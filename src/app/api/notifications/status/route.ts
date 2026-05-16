@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth-server';
+import { getAuthenticatedClient } from '@/lib/api-utils';
 import { getUnreadCount, getMonitoringSchedule } from '@/lib/db-service';
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
+    }
     const [unread, schedule] = await Promise.all([
-      getUnreadCount(user.uid),
-      getMonitoringSchedule(user.uid),
+      getUnreadCount(client.id),
+      getMonitoringSchedule(client.id),
     ]);
     return NextResponse.json({ unread, schedule });
   } catch (err) {

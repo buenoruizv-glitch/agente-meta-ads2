@@ -3,23 +3,19 @@ import Anthropic from '@anthropic-ai/sdk';
 import { AGENT_SYSTEM_PROMPT } from '@/lib/agent-prompts';
 import { getCampaigns, getAccountInsights, calculateKPIs } from '@/lib/meta-api';
 
-import { verifyAuth } from '@/lib/auth-server';
-import { getUserProfile } from '@/lib/db-service';
+import { getAuthenticatedClient } from '@/lib/api-utils';
 import { createCampaignDraftService } from '@/lib/meta-campaign-service';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 async function getMetaConfig(req: NextRequest) {
-  const user = await verifyAuth(req);
-  if (!user) throw new Error('Unauthorized');
-  
-  const profile = await getUserProfile(user.uid);
+  const { client } = await getAuthenticatedClient(req);
   
   return {
-    token: profile?.meta_access_token || process.env.META_ACCESS_TOKEN,
-    adAccountId: profile?.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
-    pixelId: profile?.meta_pixel_id || process.env.META_PIXEL_ID,
-    pageId: profile?.meta_page_id || process.env.META_PAGE_ID
+    token: client.meta_access_token || process.env.META_ACCESS_TOKEN,
+    adAccountId: client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
+    pixelId: client.meta_pixel_id || process.env.META_PIXEL_ID,
+    pageId: client.meta_page_id || process.env.META_PAGE_ID
   };
 }
 
@@ -111,14 +107,12 @@ export async function POST(req: NextRequest) {
     ];
 
     // 1. Get User Profile and Settings
-    const user = await verifyAuth(req);
-    if (!user) throw new Error('Unauthorized');
-    const profile = await getUserProfile(user.uid);
-    const userSettings = profile?.settings || {};
+    const { client } = await getAuthenticatedClient(req);
+    const userSettings = client.settings || {};
     
     // API Keys (Priority: User Profile > Environment)
-    const googleApiKey = userSettings.geminiKey || profile?.google_gemini_api_key || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-    const anthropicApiKey = profile?.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
+    const googleApiKey = userSettings.geminiKey || client.google_gemini_api_key || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const anthropicApiKey = client.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
     
     // Model Preference
     const preferredModel = userSettings.preferredModel || 'gemini'; // Default to gemini if not set

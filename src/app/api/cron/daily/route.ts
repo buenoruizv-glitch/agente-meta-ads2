@@ -26,7 +26,7 @@ import {
 } from '@/lib/automation-engine';
 import { analyzeWithClaude } from '@/lib/expert-analysis';
 import {
-  getAllActiveUsers,
+  getAllActiveClients,
   createNotification,
   saveSuggestions,
   upsertMonitoringSchedule,
@@ -49,23 +49,23 @@ export async function POST(req: NextRequest) {
   }
 
   const runStarted = new Date().toISOString();
-  const results: Array<{ userId: string; status: string; suggestions: number }> = [];
+  const results: Array<{ clientId: string; status: string; suggestions: number }> = [];
 
   try {
-    // ── Paso 1: Obtener todos los usuarios activos ─────────────────────────
-    const users = await getAllActiveUsers();
-    console.log(`[Cron Daily] Iniciando ciclo para ${users.length} usuarios`);
+    // ── Paso 1: Obtener todos los clientes activos ─────────────────────────
+    const clients = await getAllActiveClients();
+    console.log(`[Cron Daily] Iniciando ciclo para ${clients.length} clientes`);
 
-    for (const user of users) {
+    for (const client of clients) {
       const metaConfig = {
-        token: user.meta_access_token || process.env.META_ACCESS_TOKEN,
-        adAccountId: user.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
+        token: client.meta_access_token || process.env.META_ACCESS_TOKEN,
+        adAccountId: client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
       };
 
       try {
         // ── Paso 2-5: Capa Gemini (gratis) ─────────────────────────────────
         // Actualizar estado: fetching
-        await upsertMonitoringSchedule(user.id, { current_phase: 'fetching' });
+        await upsertMonitoringSchedule(client.id, { current_phase: 'fetching' });
 
         const analyzedCampaigns = await analyzeCampaigns(metaConfig);
         const campaignsWithAlerts = analyzedCampaigns.filter(c => c.alerts.length > 0);
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
         if (campaignsWithAlerts.length === 0) {
           // Todo en verde — generar reporte diario mínimo, sin Claude
           const summary = buildDailySummary(analyzedCampaigns);
-          await createNotification(user.id, {
+          await createNotification(client.id, {
             type: 'daily_report',
             priority: 'info',
             title: `✅ ${new Date().toLocaleDateString('es-ES')} — Todo en orden`,
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
             },
           });
 
-          await upsertMonitoringSchedule(user.id, {
+          await upsertMonitoringSchedule(client.id, {
             last_run_at: runStarted,
             next_run_at: getNextRunAt(),
             last_run_status: 'all_green',
@@ -102,20 +102,20 @@ export async function POST(req: NextRequest) {
             current_phase: 'done',
           });
 
-          results.push({ userId: user.id, status: 'all_green', suggestions: 0 });
+          results.push({ clientId: client.id, status: 'all_green', suggestions: 0 });
           continue;
         }
 
         // ── Paso 7: Construir brief ─────────────────────────────────────────
-        await upsertMonitoringSchedule(user.id, { current_phase: 'analyzing' });
+        await upsertMonitoringSchedule(client.id, { current_phase: 'analyzing' });
         const brief = buildClaudeBrief(campaignsWithAlerts);
 
         // ── Paso 8: Claude — Análisis estratégico ──────────────────────────
-        const anthropicKey = user.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
+        const anthropicKey = client.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
         const suggestions = await analyzeWithClaude(brief, anthropicKey || undefined);
 
         // ── Paso 9: Guardar en Supabase ────────────────────────────────────
-        await upsertMonitoringSchedule(user.id, { current_phase: 'saving' });
+        await upsertMonitoringSchedule(client.id, { current_phase: 'saving' });
 
         const urgentCount = suggestions.filter(s => s.priority === 'urgent').length;
         const opportunityCount = suggestions.filter(s => s.priority === 'opportunity').length;
@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
         const notifTitle = buildNotificationTitle(suggestions, analyzedCampaigns);
         const summary = buildDailySummary(analyzedCampaigns, suggestions.length);
 
-        const notificationId = await createNotification(user.id, {
+        const notificationId = await createNotification(client.id, {
           type: urgentCount > 0 ? 'alert' : 'opportunity',
           priority,
           title: notifTitle,
@@ -142,10 +142,10 @@ export async function POST(req: NextRequest) {
           metricsSnapshot[c.id] = { roas: c.kpis7d.roas, ctr: c.kpis7d.ctr, cpc: c.kpis7d.cpc };
         });
 
-        await saveSuggestions(user.id, notificationId, suggestions, metricsSnapshot);
+        await saveSuggestions(client.id, notificationId, suggestions, metricsSnapshot);
 
         // ── Paso 10: Actualizar schedule ────────────────────────────────────
-        await upsertMonitoringSchedule(user.id, {
+        await upsertMonitoringSchedule(client.id, {
           last_run_at: runStarted,
           next_run_at: getNextRunAt(),
           last_run_status: 'ok',
@@ -156,17 +156,17 @@ export async function POST(req: NextRequest) {
           current_phase: 'done',
         });
 
-        results.push({ userId: user.id, status: 'ok', suggestions: suggestions.length });
-      } catch (userErr) {
-        console.error(`[Cron Daily] Error for user ${user.id}:`, userErr);
-        await upsertMonitoringSchedule(user.id, {
+        results.push({ clientId: client.id, status: 'ok', suggestions: suggestions.length });
+      } catch (clientErr) {
+        console.error(`[Cron Daily] Error for client ${client.id}:`, clientErr);
+        await upsertMonitoringSchedule(client.id, {
           last_run_at: runStarted,
           next_run_at: getNextRunAt(),
           last_run_status: 'error',
-          last_run_summary: `Error: ${userErr instanceof Error ? userErr.message : 'Unknown'}`,
+          last_run_summary: `Error: ${clientErr instanceof Error ? clientErr.message : 'Unknown'}`,
           current_phase: 'idle',
         });
-        results.push({ userId: user.id, status: 'error', suggestions: 0 });
+        results.push({ clientId: client.id, status: 'error', suggestions: 0 });
       }
     }
 

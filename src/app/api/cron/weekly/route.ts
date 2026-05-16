@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllActiveUsers, createNotification, getSuggestions } from '@/lib/db-service';
+import { getAllActiveClients, createNotification, getSuggestions } from '@/lib/db-service';
 import { generateWeeklyReport } from '@/lib/expert-analysis';
 import { analyzeCampaigns } from '@/lib/automation-engine';
 
@@ -17,41 +17,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const results: Array<{ userId: string; status: string }> = [];
+  const results: Array<{ clientId: string; status: string }> = [];
 
   try {
-    const users = await getAllActiveUsers();
-    console.log(`[Cron Weekly] Generando informes semanales para ${users.length} usuarios`);
+    const clients = await getAllActiveClients();
+    console.log(`[Cron Weekly] Generando informes semanales para ${clients.length} clientes`);
 
-    for (const user of users) {
+    for (const client of clients) {
       try {
         const metaConfig = {
-          token: user.meta_access_token || process.env.META_ACCESS_TOKEN,
-          adAccountId: user.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
+          token: client.meta_access_token || process.env.META_ACCESS_TOKEN,
+          adAccountId: client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
         };
 
         // 1. Análisis actual de campañas
         const campaigns = await analyzeCampaigns(metaConfig);
 
         // 2. Sugerencias aplicadas y descartadas esta semana
-        const applied = await getSuggestions(user.id, 'applied');
-        const dismissed = await getSuggestions(user.id, 'dismissed');
+        const applied = await getSuggestions(client.id, 'applied');
+        const dismissed = await getSuggestions(client.id, 'dismissed');
 
         // 3. Construir brief semanal (~1200 tokens máx)
         const weeklyBrief = buildWeeklyBrief(campaigns, applied, dismissed);
 
         // 4. Claude genera el informe estratégico
-        const anthropicKey = user.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
+        const anthropicKey = client.anthropic_api_key || process.env.ANTHROPIC_API_KEY;
         const report = await generateWeeklyReport(weeklyBrief, anthropicKey || undefined);
 
         if (!report) {
-          results.push({ userId: user.id, status: 'no_report' });
+          results.push({ clientId: client.id, status: 'no_report' });
           continue;
         }
 
         // 5. Guardar como notificación de tipo informe semanal
         const weekStr = getWeekString();
-        await createNotification(user.id, {
+        await createNotification(client.id, {
           type: 'weekly_report',
           priority: 'info',
           title: `📊 Informe Semanal — ${weekStr}`,
@@ -74,10 +74,10 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        results.push({ userId: user.id, status: 'ok' });
-      } catch (userErr) {
-        console.error(`[Cron Weekly] Error for user ${user.id}:`, userErr);
-        results.push({ userId: user.id, status: 'error' });
+        results.push({ clientId: client.id, status: 'ok' });
+      } catch (clientErr) {
+        console.error(`[Cron Weekly] Error for client ${client.id}:`, clientErr);
+        results.push({ clientId: client.id, status: 'error' });
       }
     }
 

@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCampaigns, getCampaignInsights, calculateKPIs } from '@/lib/meta-api';
-import { verifyAuth } from '@/lib/auth-server';
-import { getUserProfile } from '@/lib/db-service';
+import { getAuthenticatedClient } from '@/lib/api-utils';
 import { google } from 'googleapis';
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
     }
 
-    // Load user settings to get sheetsId
-    const profile = await getUserProfile(user.uid);
-    const settings = profile?.settings || {};
-    const sheetsId = profile?.google_sheets_id;
+    // Load client settings to get sheetsId
+    const sheetsId = client.google_sheets_id;
 
     if (!sheetsId) {
       return NextResponse.json({ error: 'Google Sheets ID no configurado en ajustes' }, { status: 400 });
@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
 
     // 1. Fetch live metrics
     // Pass the user's metaToken and adAccountId if they are available in settings, or use default
-    const metaToken = profile?.meta_access_token || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
-    const adAccountId = profile?.meta_ad_account_id || process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
+    const metaToken = client.meta_access_token || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
+    const adAccountId = client.meta_ad_account_id || process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
     
     // For now we use the env vars if we can't pass them to the functions easily, 
     // but a real implementation should pass tokens to meta-api functions.

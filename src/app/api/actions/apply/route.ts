@@ -6,15 +6,19 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth-server';
-import { getUserProfile } from '@/lib/db-service';
+import { getAuthenticatedClient } from '@/lib/api-utils';
 import { getSuggestionById, updateSuggestionStatus } from '@/lib/db-service';
 import { pauseCampaign, updateCampaign } from '@/lib/meta-api';
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
+    }
 
     const { suggestion_id } = await req.json();
     if (!suggestion_id) {
@@ -26,7 +30,7 @@ export async function POST(req: NextRequest) {
     if (!suggestion) {
       return NextResponse.json({ error: 'Suggestion not found' }, { status: 404 });
     }
-    if (suggestion.user_id !== user.uid) {
+    if (suggestion.client_id !== client.id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     if (suggestion.status !== 'pending') {
@@ -34,10 +38,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Obtener config Meta del usuario
-    const profile = await getUserProfile(user.uid);
     const metaConfig = {
-      token: profile?.meta_access_token || process.env.META_ACCESS_TOKEN,
-      adAccountId: profile?.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
+      token: client.meta_access_token || process.env.META_ACCESS_TOKEN,
+      adAccountId: client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
     };
 
     const campaignId = suggestion.campaign_id;
@@ -116,14 +119,19 @@ export async function POST(req: NextRequest) {
 // Descartar sugerencia
 export async function DELETE(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
+    }
 
     const { suggestion_id } = await req.json();
     if (!suggestion_id) return NextResponse.json({ error: 'suggestion_id required' }, { status: 400 });
 
     const suggestion = await getSuggestionById(suggestion_id);
-    if (!suggestion || suggestion.user_id !== user.uid) {
+    if (!suggestion || suggestion.client_id !== client.id) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 

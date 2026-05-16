@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import KPICard from '@/components/KPICard';
 import { LoadingSkeleton } from '@/components/ui';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { useClient } from '@/contexts/ClientContext';
+import { apiFetch } from '@/lib/api-client';
 
 interface CampaignAnalytic {
   campaign: { id: string; name: string; status: string };
@@ -27,15 +29,20 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 };
 
 export default function AnalyticsPage() {
+  const { currentClient } = useClient();
   const [data, setData] = useState<{ campaigns: CampaignAnalytic[]; summary: { totalSpend: number; avgROAS: number; avgCTR: number; totalCampaigns: number } } | null>(null);
   const [loading, setLoading] = useState(true);
   const [datePreset, setDatePreset] = useState('last_30d');
 
   useEffect(() => {
+    if (!currentClient) return;
+    
     setLoading(true);
-    fetch(`/api/analytics?scope=campaigns&date_preset=${datePreset}`)
-      .then(r => r.json()).then(setData).finally(() => setLoading(false));
-  }, [datePreset]);
+    apiFetch(`/api/analytics?scope=campaigns&date_preset=${datePreset}`)
+      .then(res => res.json())
+      .then(setData)
+      .finally(() => setLoading(false));
+  }, [datePreset, currentClient?.id]);
 
   const chartData = (data?.campaigns || [])
     .filter(c => c.kpis)

@@ -4,6 +4,8 @@ import AppLayout from '@/components/AppLayout';
 import KPICard from '@/components/KPICard';
 import { LoadingSkeleton, CampaignStatusBadge, MetricCell } from '@/components/ui';
 import { TrendingUp, TrendingDown, Zap, AlertTriangle, Play, Pause } from 'lucide-react';
+import { apiFetch } from '@/lib/api-client';
+import { useClient } from '@/contexts/ClientContext';
 
 interface AccountKPIs {
   spend: number;
@@ -25,6 +27,7 @@ interface Campaign {
 }
 
 export default function DashboardPage() {
+  const { currentClient } = useClient();
   const [kpis, setKPIs] = useState<AccountKPIs | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,19 +35,22 @@ export default function DashboardPage() {
   const [lastRun, setLastRun] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!currentClient) return;
+    
+    setLoading(true);
     Promise.all([
-      fetch('/api/analytics?scope=account&date_preset=last_7d').then(r => r.json()),
-      fetch('/api/campaigns?insights=true&date_preset=last_7d').then(r => r.json()),
+      apiFetch('/api/analytics?scope=account&date_preset=last_7d').then(r => r.json()),
+      apiFetch('/api/campaigns?insights=true&date_preset=last_7d').then(r => r.json()),
     ]).then(([analyticsData, campaignsData]) => {
       setKPIs(analyticsData.kpis);
       setCampaigns((campaignsData.campaigns || []).slice(0, 8));
     }).finally(() => setLoading(false));
-  }, []);
+  }, [currentClient?.id]);
 
   const runAutomation = async () => {
     setRunningAutomation(true);
     try {
-      await fetch('/api/automation/run', { method: 'POST' });
+      await apiFetch('/api/automation/run', { method: 'POST' });
       setLastRun(new Date().toLocaleTimeString('es-ES'));
     } finally {
       setRunningAutomation(false);

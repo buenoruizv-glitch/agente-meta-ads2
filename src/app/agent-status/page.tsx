@@ -1,11 +1,13 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import {
   Activity, Clock, CheckCircle2, AlertCircle, RefreshCw,
-  TrendingUp, Zap, Calendar, BarChart2, Loader2, Bot
+  TrendingUp, Zap, Calendar, BarChart2, Loader2, Bot, History, DollarSign, Filter
 } from 'lucide-react';
+import { useClient } from '@/contexts/ClientContext';
 
 interface MonitoringSchedule {
   last_run_at: string | null;
@@ -17,6 +19,25 @@ interface MonitoringSchedule {
   claude_invoked: boolean;
   current_phase: string;
   updated_at: string;
+}
+
+interface ExecutionLog {
+  id: string;
+  agent: string;
+  step: string;
+  details: string | null;
+  tokens_input: number;
+  tokens_output: number;
+  cost_usd: number;
+  created_at: string;
+}
+
+interface CostSummary {
+  day: string;
+  month: string;
+  agent: string;
+  total_cost: number;
+  total_tokens: number;
 }
 
 const PHASE_CONFIG: Record<string, { label: string; color: string; pulse: boolean }> = {
@@ -66,24 +87,58 @@ function formatNextRun(iso: string | null): string {
 }
 
 export default function AgentStatusPage() {
+  const { currentClient } = useClient();
   const [schedule, setSchedule] = useState<MonitoringSchedule | null>(null);
+  const [logs, setLogs] = useState<ExecutionLog[]>([]);
+  const [costs, setCosts] = useState<CostSummary[]>([]);
+  const [costFilter, setCostFilter] = useState<'day' | 'month'>('day');
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  
   const [loading, setLoading] = useState(true);
   const [triggeringManual, setTriggeringManual] = useState(false);
   const [manualMsg, setManualMsg] = useState<string | null>(null);
 
   const fetchStatus = useCallback(async () => {
+    if (!currentClient) return;
+    
     try {
-      const res = await fetch('/api/notifications/status');
-      if (res.ok) {
-        const data = await res.json();
+      const [resStatus, resLogs, resCosts] = await Promise.all([
+        apiFetch('/api/notifications/status'),
+        apiFetch('/api/notifications/logs?limit=50'),
+        apiFetch('/api/notifications/costs')
+      ]);
+      
+      if (resStatus.ok) {
+        const data = await resStatus.json();
         setSchedule(data.schedule);
+      }
+      if (resLogs.ok) {
+        const data = await resLogs.json();
+        setLogs(data.logs);
+      }
+      if (resCosts.ok) {
+        const data = await resCosts.json();
+        setCosts(data.costs);
+        
+        if (data.costs.length > 0) {
+          setSelectedMonth(prev => {
+            if (prev) return prev;
+            const currentMonth = new Date().toISOString().substring(0, 7);
+            const months = Array.from(new Set(data.costs.map((c: any) => c.month)));
+            if (months.includes(currentMonth)) return currentMonth;
+            return months[0] as string;
+          });
+        }
       }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentClient?.id]);
 
   useEffect(() => {
+    if (!currentClient) return;
+    
+    setLoading(true);
     fetchStatus();
     // Polling cada 10 segundos si está en fase activa
     const interval = setInterval(() => {
@@ -92,14 +147,14 @@ export default function AgentStatusPage() {
       }
     }, 10000);
     return () => clearInterval(interval);
-  }, [fetchStatus, schedule?.current_phase]);
+  }, [fetchStatus, currentClient?.id, schedule?.current_phase]);
 
   const triggerManualRun = async () => {
     setTriggeringManual(true);
     setManualMsg(null);
     try {
       const secret = process.env.NEXT_PUBLIC_CRON_SECRET || '';
-      const res = await fetch('/api/cron/daily', {
+      const res = await apiFetch('/api/cron/daily', {
         method: 'POST',
         headers: { Authorization: `Bearer ${secret}` },
       });
@@ -246,7 +301,7 @@ export default function AgentStatusPage() {
       </div>
 
       {/* Arquitectura de coste */}
-      <div className="card">
+      <div className="card" style={{ marginBottom: '28px' }}>
         <h2 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <TrendingUp size={16} style={{ color: '#10b981' }} />
           Arquitectura de Coste Cero
@@ -270,6 +325,127 @@ export default function AgentStatusPage() {
         <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center' }}>
           Si todas las campañas están en verde → Claude no se invoca → <strong style={{ color: '#10b981' }}>coste = 0€</strong>
         </div>
+      </div>
+
+      {/* Resumen de Costes reales */}
+      <div className="card" style={{ marginBottom: '28px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+          <h2 style={{ fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <DollarSign size={16} style={{ color: 'var(--accent)' }} />
+            Consumo Real de IA
+          </h2>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <select
+              value={costFilter}
+              onChange={(e) => setCostFilter(e.target.value as 'day' | 'month')}
+              style={{ padding: '4px 8px', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
+            >
+              <option value="day">Por día</option>
+              <option value="month">Por mes</option>
+            </select>
+            {costFilter === 'day' && (
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                style={{ padding: '4px 8px', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
+              >
+                {Array.from(new Set(costs.map(c => c.month))).sort().reverse().map(m => (
+                  <option key={m} value={m as string}>{m as string}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+
+        {(() => {
+          const filteredCosts = costs.filter(c => costFilter === 'month' || c.month === selectedMonth);
+          let aggregatedCosts: any[] = [];
+          if (costFilter === 'month') {
+            const grouped = filteredCosts.reduce((acc, curr) => {
+              const key = `${curr.month}-${curr.agent}`;
+              if (!acc[key]) acc[key] = { ...curr, day: curr.month, id: key };
+              else {
+                acc[key].total_cost += curr.total_cost;
+                acc[key].total_tokens += curr.total_tokens;
+              }
+              return acc;
+            }, {} as Record<string, any>);
+            aggregatedCosts = Object.values(grouped).sort((a, b) => b.day.localeCompare(a.day));
+          } else {
+            aggregatedCosts = filteredCosts;
+          }
+
+          if (aggregatedCosts.length === 0) {
+            return <div style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No hay costes registrados para este periodo.</div>;
+          }
+
+          return (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)', fontWeight: 600 }}>Fecha</th>
+                    <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)', fontWeight: 600 }}>Agente</th>
+                    <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)', fontWeight: 600 }}>Tokens</th>
+                    <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)', fontWeight: 600 }}>Coste USD</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aggregatedCosts.map((c, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '8px' }}>{c.day}</td>
+                      <td style={{ padding: '8px', color: c.agent === 'Claude' ? '#a78bfa' : '#60a5fa', fontWeight: 600 }}>{c.agent}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontFamily: 'monospace' }}>{c.total_tokens.toLocaleString()}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600 }}>${c.total_cost.toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Historial de Ejecuciones */}
+      <div className="card">
+        <h2 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <History size={16} style={{ color: 'var(--accent)' }} />
+          Historial de Ejecuciones
+        </h2>
+        
+        {logs.length === 0 ? (
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No hay registros de ejecución recientes.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {logs.map(log => (
+              <div key={log.id} style={{ display: 'flex', gap: '12px', padding: '12px', background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ flexShrink: 0, marginTop: '2px' }}>
+                  {log.agent === 'Gemini' ? <Zap size={16} color="#60a5fa" /> : <Bot size={16} color="#a78bfa" />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: log.agent === 'Claude' ? '#a78bfa' : '#60a5fa' }}>{log.agent} <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>· {log.step}</span></div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {new Date(log.created_at).toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  {log.details && (
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '6px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {log.details}
+                    </div>
+                  )}
+                  {(log.tokens_input > 0 || log.tokens_output > 0) && (
+                    <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                      <span title="Tokens In">In: {log.tokens_input}</span>
+                      <span title="Tokens Out">Out: {log.tokens_output}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Coste: ${log.cost_usd.toFixed(4)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <style>{`@keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.5; transform:scale(1.3); } }`}</style>

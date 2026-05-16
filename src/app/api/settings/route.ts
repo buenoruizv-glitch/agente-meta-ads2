@@ -1,29 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth-server';
-import { getUserProfile, updateUserProfile } from '@/lib/db-service';
+import { getAuthenticatedClient } from '@/lib/api-utils';
+import { getClient, updateClient } from '@/lib/db-service';
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const profile = await getUserProfile(user.uid);
-
-    if (!profile) {
-      return NextResponse.json({ settings: {} }, { status: 200 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
     }
 
     // Combine flat columns and the settings JSONB for the frontend
     const combinedSettings = {
-      ...(profile.settings || {}),
-      metaToken: profile.meta_access_token,
-      adAccountId: profile.meta_ad_account_id,
-      slackWebhook: profile.slack_webhook_url,
-      anthropicKey: profile.anthropic_api_key,
-      sheetsId: profile.google_sheets_id,
-      // geminiKey and preferredModel are already in profile.settings if they exist
+      ...(client.settings || {}),
+      metaToken: client.meta_access_token,
+      adAccountId: client.meta_ad_account_id,
+      slackWebhook: client.slack_webhook_url,
+      anthropicKey: client.anthropic_api_key,
+      sheetsId: client.google_sheets_id,
     };
 
     return NextResponse.json({ settings: combinedSettings }, { status: 200 });
@@ -35,17 +31,20 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
     }
 
     const body = await req.json();
-    
+
     // Extract core fields to top-level columns
-    const { 
-      metaToken, adAccountId, slackWebhook, anthropicKey, sheetsId, 
-      ...rest 
+    const {
+      metaToken, adAccountId, slackWebhook, anthropicKey, sheetsId,
+      ...rest
     } = body;
 
     const updates = {
@@ -57,7 +56,7 @@ export async function POST(req: NextRequest) {
       settings: rest // preferredModel and geminiKey will stay here
     };
 
-    await updateUserProfile(user.uid, updates);
+    await updateClient(client.id, updates);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

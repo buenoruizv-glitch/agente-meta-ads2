@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { LoadingSkeleton, EmptyState } from '@/components/ui';
@@ -26,7 +27,10 @@ const OP_LABELS: Record<string, string> = {
   gt: '>', lt: '<', gte: '≥', lte: '≤', eq: '=',
 };
 
+import { useClient } from '@/contexts/ClientContext';
+
 export default function AutomationPage() {
+  const { currentClient } = useClient();
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -41,7 +45,9 @@ export default function AutomationPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/automation')
+    if (!currentClient) return;
+    setLoading(true);
+    apiFetch('/api/automation')
       .then(r => r.json())
       .then(d => {
         setRules(d.rules || []);
@@ -52,12 +58,12 @@ export default function AutomationPage() {
         setError('Error al cargar las reglas. Comprueba tu conexión.');
         setLoading(false);
       });
-  }, []);
+  }, [currentClient?.id]);
 
   const toggleRule = async (rule: AutomationRule) => {
     setError(null);
     try {
-      const res = await fetch('/api/automation', {
+      const res = await apiFetch('/api/automation', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: rule.id, enabled: !rule.enabled }),
@@ -73,7 +79,7 @@ export default function AutomationPage() {
     if (!confirm('¿Estás seguro de que quieres eliminar esta regla?')) return;
     setError(null);
     try {
-      const res = await fetch('/api/automation', {
+      const res = await apiFetch('/api/automation', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
@@ -90,7 +96,7 @@ export default function AutomationPage() {
     setError(null);
     setLastResult(null);
     try {
-      const res = await fetch('/api/automation/run', { method: 'POST' });
+      const res = await apiFetch('/api/automation/run', { method: 'POST' });
       if (!res.ok) throw new Error('Error al ejecutar las reglas');
       const data = await res.json();
       setLastResult({ triggered: data.triggered, evaluated: data.evaluated });
@@ -120,7 +126,7 @@ export default function AutomationPage() {
         notifySlack: true
       };
 
-      const res = await fetch('/api/automation', {
+      const res = await apiFetch('/api/automation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

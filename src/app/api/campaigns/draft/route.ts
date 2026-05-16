@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createCampaignDraftService } from '@/lib/meta-campaign-service';
-import { verifyAuth } from '@/lib/auth-server';
-import { getUserProfile } from '@/lib/db-service';
+import { getAuthenticatedClient } from '@/lib/api-utils';
 
 async function getMetaConfig(req: NextRequest) {
-  const user = await verifyAuth(req);
-  if (!user) throw new Error('Unauthorized');
-  
-  const profile = await getUserProfile(user.uid);
+  const { client } = await getAuthenticatedClient(req);
   
   return {
-    token: profile?.meta_access_token || process.env.META_ACCESS_TOKEN,
-    adAccountId: profile?.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
-    pixelId: profile?.meta_pixel_id || process.env.META_PIXEL_ID
+    token: client.meta_access_token || process.env.META_ACCESS_TOKEN,
+    adAccountId: client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
+    pixelId: client.meta_pixel_id || process.env.META_PIXEL_ID
   };
 }
 

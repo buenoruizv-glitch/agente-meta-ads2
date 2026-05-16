@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedClient } from '@/lib/api-utils';
-import { getSuggestions } from '@/lib/db-service';
+import { getCostSummary } from '@/lib/db-service';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,8 +11,9 @@ export async function GET(req: NextRequest) {
     } catch (error) {
       return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
     }
-    const suggestions = await getSuggestions(client.id, 'pending');
-    return NextResponse.json(suggestions);
+    
+    const costs = await getCostSummary(client.id);
+    return NextResponse.json({ costs });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

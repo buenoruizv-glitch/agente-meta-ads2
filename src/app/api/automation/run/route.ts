@@ -1,26 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { evaluateRulesForCampaigns, AutomationRule, formatRuleResultForSlack } from '@/lib/automation-engine';
-import { getUserProfile, getUserRules, saveAutomationLog, incrementRuleTriggerCount } from '@/lib/db-service';
-import { verifyAuth } from '@/lib/auth-server';
+import { getClientRules, saveAutomationLog, incrementRuleTriggerCount } from '@/lib/db-service';
+import { getAuthenticatedClient } from '@/lib/api-utils';
 
 // POST /api/automation/run — triggered by cron or manually
 // This is the main automation evaluation loop
 export async function POST(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
     }
 
-    // Get user settings (profile) from Supabase
-    const profile = await getUserProfile(user.uid);
-    const settings = profile || {};
+    // Get client automation rules from Supabase
+    let rules = await getClientRules(client.id);
 
-    // Get user automation rules from Supabase
-    let rules = await getUserRules(user.uid);
-    
     if (rules.length === 0) {
-      // Fallback to default rules if user has none
+      // Fallback to default rules if client has none
       const { DEFAULT_RULES } = await import('@/lib/automation-engine');
       rules = DEFAULT_RULES.map((r, i) => ({
         ...r,
@@ -33,16 +32,16 @@ export async function POST(req: NextRequest) {
     const activeRules = rules.filter(r => r.enabled);
 
     const metaConfig = {
-      token: settings.meta_access_token || process.env.META_ACCESS_TOKEN,
-      adAccountId: settings.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID
+      token: client.meta_access_token || process.env.META_ACCESS_TOKEN,
+      adAccountId: client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID
     };
 
     const results = await evaluateRulesForCampaigns(activeRules, metaConfig);
     const triggered = results.filter(r => r.triggered);
 
-    // Send Slack notifications for triggered rules using user's webhook
-    const slackWebhookUrl = settings.slack_webhook_url || process.env.SLACK_WEBHOOK_URL;
-    
+    // Send Slack notifications for triggered rules using client's webhook
+    const slackWebhookUrl = client.slack_webhook_url || process.env.SLACK_WEBHOOK_URL;
+
     if (slackWebhookUrl && triggered.length > 0) {
       const slackMessages = triggered.map(formatRuleResultForSlack).join('\n\n---\n\n');
       try {
@@ -60,12 +59,12 @@ export async function POST(req: NextRequest) {
 
     // Update logs and trigger counts in Supabase
     for (const res of results) {
-       // We save logs for everything (auditing), but only update counts for actual triggers
-       await saveAutomationLog(user.uid, res);
-       
-       if (res.triggered && !res.ruleId.startsWith('default-')) {
-          await incrementRuleTriggerCount(res.ruleId);
-       }
+      // We save logs for everything (auditing), but only update counts for actual triggers
+      await saveAutomationLog(client.id, res);
+
+      if (res.triggered && !res.ruleId.startsWith('default-')) {
+        await incrementRuleTriggerCount(res.ruleId);
+      }
     }
 
     return NextResponse.json({

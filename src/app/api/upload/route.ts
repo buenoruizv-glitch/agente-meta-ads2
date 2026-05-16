@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth-server';
+import { getAuthenticatedClient } from '@/lib/api-utils';
 import { createClient } from '@supabase/supabase-js';
 
 // Use service role to bypass RLS for storage uploads
@@ -12,9 +12,12 @@ const BUCKET = 'creatives';
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await verifyAuth(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    let client;
+    try {
+      const authResult = await getAuthenticatedClient(req);
+      client = authResult.client;
+    } catch (error) {
+      return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
     }
 
     const formData = await req.formData();
@@ -29,7 +32,7 @@ export async function POST(req: NextRequest) {
     for (const file of files) {
       const ext = file.name.split('.').pop()?.toLowerCase() || 'bin';
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const path = `${user.uid}/${Date.now()}_${safeName}`;
+      const path = `${client.id}/${Date.now()}_${safeName}`;
 
       const buffer = Buffer.from(await file.arrayBuffer());
 

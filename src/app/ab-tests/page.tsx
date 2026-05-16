@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { EmptyState, LoadingSkeleton } from '@/components/ui';
 import { FlaskConical, Plus, Trophy, ChevronRight, AlertCircle } from 'lucide-react';
+import { apiFetch } from '@/lib/api-client';
+import { useClient } from '@/contexts/ClientContext';
 
 interface Variant {
   name: string; spend: number; conversions: number; cpa: number;
@@ -15,17 +17,23 @@ interface ABTest {
 }
 
 export default function ABTestsPage() {
+  const { currentClient } = useClient();
   const [tests, setTests] = useState<ABTest[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/ab-tests')
+    if (!currentClient) return;
+
+    setLoading(true);
+    apiFetch('/api/ab-tests')
       .then(res => res.json())
       .then(data => {
         setTests(data.tests || []);
+      })
+      .finally(() => {
         setLoading(false);
       });
-  }, []);
+  }, [currentClient?.id]);
 
   return (
     <AppLayout>

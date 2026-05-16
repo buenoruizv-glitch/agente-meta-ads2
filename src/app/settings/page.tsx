@@ -1,9 +1,13 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Save, Eye, EyeOff, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 
+import { useClient } from '@/contexts/ClientContext';
+
 export default function SettingsPage() {
+  const { currentClient } = useClient();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -26,8 +30,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     async function loadSettings() {
+      if (!currentClient) return;
+      setLoading(true);
       try {
-        const res = await fetch('/api/settings');
+        const res = await apiFetch('/api/settings');
         if (res.ok) {
           const data = await res.json();
           if (data.settings && Object.keys(data.settings).length > 0) {
@@ -41,13 +47,13 @@ export default function SettingsPage() {
       }
     }
     loadSettings();
-  }, []);
+  }, [currentClient?.id]);
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/settings', {
+      const res = await apiFetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)

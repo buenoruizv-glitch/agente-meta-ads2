@@ -1,8 +1,10 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 import { useEffect, useState, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { CampaignStatusBadge, MetricCell, LoadingSkeleton, EmptyState } from '@/components/ui';
 import { RefreshCw, Play, Pause, Plus, Search } from 'lucide-react';
+import { useClient } from '@/contexts/ClientContext';
 
 interface Campaign {
   id: string;
@@ -25,6 +27,7 @@ const OBJECTIVES: Record<string, string> = {
 };
 
 export default function CampaignsPage() {
+  const { currentClient } = useClient();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
@@ -33,22 +36,23 @@ export default function CampaignsPage() {
   const [datePreset, setDatePreset] = useState('last_7d');
 
   const fetchCampaigns = useCallback(async () => {
+    if (!currentClient) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/campaigns?insights=true&date_preset=${datePreset}`);
+      const res = await apiFetch(`/api/campaigns?insights=true&date_preset=${datePreset}`);
       const data = await res.json();
       setCampaigns(data.campaigns || []);
     } finally {
       setLoading(false);
     }
-  }, [datePreset]);
+  }, [datePreset, currentClient?.id]);
 
   useEffect(() => { fetchCampaigns(); }, [fetchCampaigns]);
 
   const toggleStatus = async (c: Campaign) => {
     setUpdating(c.id);
     const action = c.status === 'ACTIVE' ? 'pause' : 'activate';
-    await fetch('/api/campaigns', {
+    await apiFetch('/api/campaigns', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ campaignId: c.id, action }),

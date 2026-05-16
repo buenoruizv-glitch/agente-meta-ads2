@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedClient } from '@/lib/api-utils';
-import { getSuggestions } from '@/lib/db-service';
+import { getAgentLogs } from '@/lib/db-service';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,8 +11,13 @@ export async function GET(req: NextRequest) {
     } catch (error) {
       return NextResponse.json({ error: 'Unauthorized or invalid client' }, { status: 401 });
     }
-    const suggestions = await getSuggestions(client.id, 'pending');
-    return NextResponse.json(suggestions);
+    
+    const { searchParams } = new URL(req.url);
+    const limitParam = searchParams.get('limit');
+    const limit = limitParam ? parseInt(limitParam, 10) : 50;
+
+    const logs = await getAgentLogs(client.id, limit);
+    return NextResponse.json({ logs });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

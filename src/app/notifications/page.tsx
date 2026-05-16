@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
@@ -53,7 +54,10 @@ const ACTION_LABELS: Record<string, string> = {
   activate: '▶️ Activar campaña',
 };
 
+import { useClient } from '@/contexts/ClientContext';
+
 export default function NotificationsPage() {
+  const { currentClient } = useClient();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
@@ -64,11 +68,12 @@ export default function NotificationsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
+    if (!currentClient) return;
     setLoading(true);
     try {
       const [sugRes, notifRes] = await Promise.all([
-        fetch('/api/notifications/suggestions'),
-        fetch('/api/notifications/list'),
+        apiFetch('/api/notifications/suggestions'),
+        apiFetch('/api/notifications/list'),
       ]);
       if (sugRes.ok) setSuggestions(await sugRes.json());
       if (notifRes.ok) setNotifications(await notifRes.json());
@@ -77,7 +82,7 @@ export default function NotificationsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentClient?.id]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -86,7 +91,7 @@ export default function NotificationsPage() {
     setSuccessMsg(null);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/actions/apply', {
+      const res = await apiFetch('/api/actions/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suggestion_id: suggestionId }),
@@ -104,7 +109,7 @@ export default function NotificationsPage() {
 
   const handleDismiss = async (suggestionId: string) => {
     try {
-      await fetch('/api/actions/apply', {
+      await apiFetch('/api/actions/apply', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suggestion_id: suggestionId }),

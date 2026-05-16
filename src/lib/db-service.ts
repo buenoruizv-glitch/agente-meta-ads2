@@ -1,12 +1,13 @@
 import { supabase } from './supabase';
 import { supabaseAdmin } from './supabase';
 import { AutomationRule, RuleEvaluationResult } from './automation-engine';
-import type { ExpertSuggestion, WeeklyInsight } from './expert-analysis';
+import type { ExpertSuggestion } from './expert-analysis';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface NotificationRow {
   id: string;
+  client_id: string;
   user_id: string;
   type: string;
   priority: string;
@@ -21,6 +22,7 @@ export interface NotificationRow {
 
 export interface SuggestionRow {
   id: string;
+  client_id: string;
   user_id: string;
   notification_id: string;
   campaign_id: string;
@@ -39,6 +41,7 @@ export interface SuggestionRow {
 
 export interface MonitoringScheduleRow {
   id: string;
+  client_id: string;
   user_id: string;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -51,26 +54,44 @@ export interface MonitoringScheduleRow {
   updated_at: string;
 }
 
-export async function getUserProfile(userId: string) {
-  console.log('getUserProfile - Fetching profile for:', userId);
+export interface ExecutionLogRow {
+  id: string;
+  client_id: string;
+  user_id: string;
+  agent: string;
+  step: string;
+  details: string | null;
+  tokens_input: number;
+  tokens_output: number;
+  cost_usd: number;
+  created_at: string;
+}
+
+export interface CostSummaryRow {
+  client_id: string;
+  day: string;
+  month: string;
+  agent: string;
+  total_cost: number;
+  total_tokens: number;
+}
+
+export async function getClient(clientId: string) {
   const { data, error } = await supabase
-    .from('profiles')
+    .from('clients')
     .select('*')
-    .eq('id', userId)
+    .eq('id', clientId)
     .single();
 
-  if (error && error.code !== 'PGRST116') {
-    console.error('getUserProfile - Error:', error.message);
-    throw error;
-  }
-  console.log('getUserProfile - Profile found:', !!data);
+  if (error) throw error;
   return data;
 }
 
-export async function updateUserProfile(userId: string, updates: any) {
+export async function updateClient(clientId: string, updates: any) {
   const { data, error } = await supabase
-    .from('profiles')
-    .upsert({ id: userId, ...updates, updated_at: new Date().toISOString() })
+    .from('clients')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', clientId)
     .select()
     .single();
 
@@ -78,11 +99,11 @@ export async function updateUserProfile(userId: string, updates: any) {
   return data;
 }
 
-export async function getUserRules(userId: string): Promise<AutomationRule[]> {
+export async function getClientRules(clientId: string): Promise<AutomationRule[]> {
   const { data, error } = await supabase
     .from('automation_rules')
     .select('*')
-    .eq('user_id', userId);
+    .eq('client_id', clientId);
 
   if (error) throw error;
   
@@ -101,12 +122,12 @@ export async function getUserRules(userId: string): Promise<AutomationRule[]> {
   }));
 }
 
-export async function saveAutomationLog(userId: string, result: RuleEvaluationResult) {
+export async function saveAutomationLog(clientId: string, result: RuleEvaluationResult) {
   const { error } = await supabase
     .from('automation_logs')
     .insert({
       rule_id: result.ruleId.startsWith('default-') ? null : result.ruleId,
-      user_id: userId,
+      client_id: clientId,
       entity_id: result.entityId,
       entity_name: result.entityName,
       triggered: result.triggered,
@@ -127,7 +148,6 @@ export async function incrementRuleTriggerCount(ruleId: string) {
   const { error } = await supabase.rpc('increment_rule_count', { row_id: ruleId });
   
   if (error) {
-    // If RPC doesn't exist, we fallback to a normal update (but RPC is safer for concurrency)
     const { data: rule } = await supabase
       .from('automation_rules')
       .select('trigger_count')
@@ -144,7 +164,7 @@ export async function incrementRuleTriggerCount(ruleId: string) {
   }
 }
 
-export async function saveCampaignSnapshot(userId: string, snapshot: {
+export async function saveCampaignSnapshot(clientId: string, snapshot: {
   campaign_id: string;
   campaign_name: string;
   spend: number;
@@ -156,7 +176,7 @@ export async function saveCampaignSnapshot(userId: string, snapshot: {
   const { error } = await supabase
     .from('campaign_snapshots')
     .insert({
-      user_id: userId,
+      client_id: clientId,
       ...snapshot,
       snapshot_date: new Date().toISOString().split('T')[0]
     });
@@ -167,20 +187,20 @@ export async function saveCampaignSnapshot(userId: string, snapshot: {
 // ─── Monitoring Schedule ──────────────────────────────────────────────────────
 
 export async function upsertMonitoringSchedule(
-  userId: string,
-  updates: Partial<Omit<MonitoringScheduleRow, 'id' | 'user_id'>>
+  clientId: string,
+  updates: Partial<Omit<MonitoringScheduleRow, 'id' | 'client_id' | 'user_id'>>
 ) {
   const { error } = await supabase
     .from('monitoring_schedule')
-    .upsert({ user_id: userId, ...updates, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    .upsert({ client_id: clientId, ...updates, updated_at: new Date().toISOString() }, { onConflict: 'client_id' });
   if (error) console.error('upsertMonitoringSchedule error:', error.message);
 }
 
-export async function getMonitoringSchedule(userId: string): Promise<MonitoringScheduleRow | null> {
+export async function getMonitoringSchedule(clientId: string): Promise<MonitoringScheduleRow | null> {
   const { data, error } = await supabase
     .from('monitoring_schedule')
     .select('*')
-    .eq('user_id', userId)
+    .eq('client_id', clientId)
     .single();
   if (error && error.code !== 'PGRST116') throw error;
   return data;
@@ -189,7 +209,7 @@ export async function getMonitoringSchedule(userId: string): Promise<MonitoringS
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 export async function createNotification(
-  userId: string,
+  clientId: string,
   notification: {
     type: string;
     priority: string;
@@ -200,18 +220,18 @@ export async function createNotification(
 ): Promise<string> {
   const { data, error } = await supabase
     .from('agent_notifications')
-    .insert({ user_id: userId, ...notification })
+    .insert({ client_id: clientId, ...notification })
     .select('id')
     .single();
   if (error) throw error;
   return data.id;
 }
 
-export async function getNotifications(userId: string, limit = 50): Promise<NotificationRow[]> {
+export async function getNotifications(clientId: string, limit = 50): Promise<NotificationRow[]> {
   const { data, error } = await supabase
     .from('agent_notifications')
     .select('*')
-    .eq('user_id', userId)
+    .eq('client_id', clientId)
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -226,11 +246,11 @@ export async function markNotificationRead(notificationId: string) {
   if (error) console.error('markNotificationRead error:', error.message);
 }
 
-export async function getUnreadCount(userId: string): Promise<number> {
+export async function getUnreadCount(clientId: string): Promise<number> {
   const { count, error } = await supabase
     .from('agent_notifications')
     .select('*', { count: 'exact', head: true })
-    .eq('user_id', userId)
+    .eq('client_id', clientId)
     .eq('status', 'unread');
   if (error) return 0;
   return count || 0;
@@ -239,14 +259,14 @@ export async function getUnreadCount(userId: string): Promise<number> {
 // ─── Suggestions ──────────────────────────────────────────────────────────────
 
 export async function saveSuggestions(
-  userId: string,
+  clientId: string,
   notificationId: string,
   suggestions: ExpertSuggestion[],
   metricsSnapshot: Record<string, unknown>
 ) {
   if (suggestions.length === 0) return;
   const rows = suggestions.map(s => ({
-    user_id: userId,
+    client_id: clientId,
     notification_id: notificationId,
     campaign_id: s.campaign_id,
     campaign_name: s.campaign_name,
@@ -262,11 +282,11 @@ export async function saveSuggestions(
   if (error) throw error;
 }
 
-export async function getSuggestions(userId: string, status = 'pending'): Promise<SuggestionRow[]> {
+export async function getSuggestions(clientId: string, status = 'pending'): Promise<SuggestionRow[]> {
   const { data, error } = await supabase
     .from('agent_suggestions')
     .select('*')
-    .eq('user_id', userId)
+    .eq('client_id', clientId)
     .eq('status', status)
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -294,11 +314,13 @@ export async function updateSuggestionStatus(id: string, status: 'applied' | 'di
 // ─── Active Users for Cron ────────────────────────────────────────────────────
 
 /**
- * Devuelve todos los usuarios con token de Meta configurado.
+ * Devuelve todos los clientes con token de Meta configurado.
  * Usa supabaseAdmin (service role) para poder leer todos los perfiles.
  */
-export async function getAllActiveUsers(): Promise<Array<{
+export async function getAllActiveClients(): Promise<Array<{
   id: string;
+  user_id: string;
+  name: string;
   meta_access_token: string;
   meta_ad_account_id: string;
   anthropic_api_key: string | null;
@@ -306,11 +328,55 @@ export async function getAllActiveUsers(): Promise<Array<{
 }>> {
   const client = supabaseAdmin || supabase;
   const { data, error } = await client
-    .from('profiles')
-    .select('id, meta_access_token, meta_ad_account_id, anthropic_api_key, settings')
+    .from('clients')
+    .select('id, user_id, name, meta_access_token, meta_ad_account_id, anthropic_api_key, settings')
     .not('meta_access_token', 'is', null)
     .not('meta_ad_account_id', 'is', null);
   if (error) throw error;
   return (data || []) as any[];
 }
 
+// ─── Logs & Costs ─────────────────────────────────────────────────────────────
+
+export async function logAgentActivity(log: {
+  client_id: string;
+  agent: string;
+  step: string;
+  details?: string;
+  tokens_input?: number;
+  tokens_output?: number;
+  cost_usd?: number;
+}) {
+  const client = supabaseAdmin || supabase;
+  const { error } = await client
+    .from('agent_execution_logs')
+    .insert(log);
+  if (error) console.error('logAgentActivity error:', error.message);
+}
+
+export async function getAgentLogs(clientId: string, limit = 50): Promise<ExecutionLogRow[]> {
+  const { data, error } = await supabase
+    .from('agent_execution_logs')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error('getAgentLogs error:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
+export async function getCostSummary(clientId: string): Promise<CostSummaryRow[]> {
+  const { data, error } = await supabase
+    .from('agent_cost_summary')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('day', { ascending: false });
+  if (error) {
+    console.error('getCostSummary error:', error.message);
+    return [];
+  }
+  return data || [];
+}

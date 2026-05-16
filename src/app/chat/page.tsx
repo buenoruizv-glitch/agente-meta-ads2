@@ -1,8 +1,10 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 import { useState, useRef, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { PROMPT_TEMPLATES } from '@/lib/agent-prompts';
 import { Send, RefreshCw, Paperclip, X, Image as ImageIcon, Video } from 'lucide-react';
+import { useClient } from '@/contexts/ClientContext';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -46,6 +48,7 @@ const defaultMessages: Message[] = [
 ];
 
 export default function ChatPage() {
+  const { currentClient, isLoading: clientsLoading } = useClient();
   const [messages, setMessages] = useState<Message[]>(defaultMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,31 +59,37 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load from localStorage on mount
+  const chatStorageKey = currentClient ? `meta_ads_chat_history_${currentClient.id}` : 'meta_ads_chat_history_guest';
+
+  // Load from localStorage on client change
   useEffect(() => {
-    const saved = localStorage.getItem('meta_ads_chat_history');
+    if (clientsLoading) return;
+
+    const saved = localStorage.getItem(chatStorageKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.length > 0) {
           setMessages(parsed);
+        } else {
+          setMessages([{...defaultMessages[0], timestamp: new Date().toISOString()}]);
         }
       } catch (e) {
         console.error('Error loading chat history', e);
+        setMessages([{...defaultMessages[0], timestamp: new Date().toISOString()}]);
       }
     } else {
-      // Set initial timestamp for the default message only on client
-      setMessages(prev => [{...prev[0], timestamp: new Date().toISOString()}]);
+      setMessages([{...defaultMessages[0], timestamp: new Date().toISOString()}]);
     }
     setIsLoaded(true);
-  }, []);
+  }, [chatStorageKey, clientsLoading]);
 
   // Save to localStorage on change
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem('meta_ads_chat_history', JSON.stringify(messages));
+    if (isLoaded && !clientsLoading) {
+      localStorage.setItem(chatStorageKey, JSON.stringify(messages));
     }
-  }, [messages, isLoaded]);
+  }, [messages, isLoaded, chatStorageKey, clientsLoading]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -92,7 +101,7 @@ export default function ChatPage() {
     try {
       const formData = new FormData();
       Array.from(e.target.files).forEach(f => formData.append('files', f));
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setUploadedFiles(prev => [...prev, ...data.files]);
@@ -132,7 +141,7 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/agent', {
+      const res = await apiFetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -174,8 +183,18 @@ export default function ChatPage() {
       timestamp: new Date().toISOString(),
     };
     setMessages([resetMessage]);
-    localStorage.removeItem('meta_ads_chat_history');
+    localStorage.removeItem(chatStorageKey);
   };
+
+  if (!currentClient && !clientsLoading) {
+    return (
+      <AppLayout>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', color: 'var(--text-muted)' }}>
+          <p>Selecciona un cliente para comenzar el chat.</p>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>

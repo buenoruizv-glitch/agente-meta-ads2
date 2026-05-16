@@ -1,4 +1,7 @@
 'use client';
+
+import { apiFetch } from '@/lib/api-client';
+import { useClient } from '@/contexts/ClientContext';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
@@ -7,6 +10,8 @@ import {
   FlaskConical, Zap, Settings, Plug, LogOut, Bell, Activity
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+
+import { ClientSelector } from './ClientSelector';
 
 const NAV_ITEMS = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -26,13 +31,16 @@ const SECONDARY_ITEMS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { currentClient } = useClient();
   const [unreadCount, setUnreadCount] = useState(0);
 
   // Polling ligero del badge de notificaciones cada 60s
   useEffect(() => {
+    if (!currentClient) return;
+
     const fetchUnread = async () => {
       try {
-        const res = await fetch('/api/notifications/status');
+        const res = await apiFetch('/api/notifications/status');
         if (res.ok) {
           const data = await res.json();
           setUnreadCount(data.unread || 0);
@@ -42,7 +50,7 @@ export default function Sidebar() {
     fetchUnread();
     const interval = setInterval(fetchUnread, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentClient?.id]);
 
   return (
     <aside className="sidebar">
@@ -53,6 +61,11 @@ export default function Sidebar() {
           <div className="sidebar-logo-text">Meta<span>Agent</span></div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px' }}>Powered by Claude AI</div>
         </div>
+      </div>
+
+      {/* Client Selector */}
+      <div style={{ padding: '0 16px 16px 16px' }}>
+        <ClientSelector />
       </div>
 
       {/* Main nav */}
@@ -96,7 +109,7 @@ export default function Sidebar() {
         <button
           onClick={async () => {
             await supabase.auth.signOut();
-            await fetch('/api/auth/session', { method: 'DELETE' });
+            await apiFetch('/api/auth/session', { method: 'DELETE' });
             window.location.href = '/login';
           }}
           className="nav-item"

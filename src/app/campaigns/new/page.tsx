@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
@@ -41,7 +42,7 @@ export default function NewCampaignWizard() {
     setError('');
     
     try {
-      const res = await fetch('/api/campaigns/draft', {
+      const res = await apiFetch('/api/campaigns/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
