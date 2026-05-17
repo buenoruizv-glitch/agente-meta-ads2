@@ -1,3 +1,4 @@
+export const maxDuration = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { AGENT_SYSTEM_PROMPT } from '@/lib/agent-prompts';
@@ -75,10 +76,15 @@ export async function POST(req: NextRequest) {
     // Prepare messages for Anthropic API
     const anthropicMessages = messages.reduce((acc: any[], m: any) => {
       if (acc.length === 0 && m.role !== 'user') return acc;
-      acc.push({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      });
+      const lastMsg = acc[acc.length - 1];
+      if (lastMsg && lastMsg.role === m.role) {
+        lastMsg.content += '\n\n' + m.content;
+      } else {
+        acc.push({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        });
+      }
       return acc;
     }, []);
 
@@ -159,10 +165,17 @@ export async function POST(req: NextRequest) {
 
           const history = messages.slice(0, -1).reduce((acc: any[], m: any) => {
             if (acc.length === 0 && m.role !== 'user') return acc;
-            acc.push({
-              role: m.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
-            });
+            const mappedRole = m.role === 'assistant' ? 'model' : 'user';
+            const textContent = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            const lastMsg = acc[acc.length - 1];
+            if (lastMsg && lastMsg.role === mappedRole) {
+              lastMsg.parts[0].text += '\n\n' + textContent;
+            } else {
+              acc.push({
+                role: mappedRole,
+                parts: [{ text: textContent }],
+              });
+            }
             return acc;
           }, []);
 
