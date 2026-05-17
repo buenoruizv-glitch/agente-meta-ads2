@@ -135,11 +135,11 @@ export async function POST(req: NextRequest) {
           continue;
         }
         try {
-          // Use Gemini 1.5 Flash (Free Tier)
+          // Use Gemini 2.5 Flash
           const { GoogleGenerativeAI } = await import('@google/generative-ai');
           const genAI = new GoogleGenerativeAI(googleApiKey as string);
           const model = genAI.getGenerativeModel({ 
-            model: 'gemini-1.5-flash', // Updated to latest stable name
+            model: 'gemini-2.5-flash', // Updated to latest stable Gemini 2.5 Flash
             systemInstruction: {
               role: 'system',
               parts: [{ text: systemPrompt }],
@@ -276,6 +276,10 @@ export async function POST(req: NextRequest) {
           currentModel = 'gemini'; // Switch for next attempt
         }
       }
+    }
+
+    if (!responseText) {
+      throw new Error("No se pudo obtener respuesta del agente de IA. Todos los intentos con Gemini y Claude fallaron. Por favor, verifica la configuración de tus API Keys.");
     }
 
     return NextResponse.json({

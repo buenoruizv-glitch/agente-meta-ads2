@@ -35,15 +35,40 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) return;
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('clients')
         .select('*')
         .eq('user_id', userData.user.id)
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('Error fetching clients:', error);
-        return;
+        if (error.code === 'PGRST205' || error.message.includes('clients')) {
+          const { data: profile, error: pError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userData.user.id)
+            .single();
+            
+          if (!pError && profile) {
+            data = [{
+              id: profile.id,
+              name: 'Cliente Principal (Fallback)',
+              meta_access_token: profile.meta_access_token,
+              meta_ad_account_id: profile.meta_ad_account_id,
+              anthropic_api_key: profile.anthropic_api_key,
+              google_sheets_id: undefined,
+              settings: {},
+              created_at: profile.created_at || new Date().toISOString()
+            }];
+            error = null as any;
+          } else {
+            console.error('Error fetching fallback profile:', pError);
+            return;
+          }
+        } else {
+          console.error('Error fetching clients:', error);
+          return;
+        }
       }
 
       setClients(data || []);

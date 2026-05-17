@@ -81,38 +81,75 @@ export async function analyzeWithClaude(
   apiKey?: string
 ): Promise<ExpertSuggestion[]> {
   const key = apiKey || process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error('No Anthropic API key available');
+  
+  if (key) {
+    try {
+      const client = new Anthropic({ apiKey: key });
 
-  const client = new Anthropic({ apiKey: key });
-
-  const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
-    max_tokens: 1024,  // Respuesta corta — solo JSON
-    system: EXPERT_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: `Analiza el siguiente brief de campañas con alertas y responde ÚNICAMENTE con un JSON válido siguiendo este schema:
+      const response = await client.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 1024,  // Respuesta corta — solo JSON
+        system: EXPERT_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `Analiza el siguiente brief de campañas con alertas y responde ÚNICAMENTE con un JSON válido siguiendo este schema:
 
 ${DAILY_JSON_SCHEMA}
 
 BRIEF:
 ${brief}`,
-      },
-    ],
-  });
+          },
+        ],
+      });
 
-  const textBlock = response.content.find(c => c.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') return [];
+      const textBlock = response.content.find(c => c.type === 'text');
+      if (textBlock && textBlock.type === 'text') {
+        // Extraer JSON aunque venga envuelto en ```json ... ```
+        const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return parsed.suggestions || [];
+        }
+      }
+    } catch (claudeErr) {
+      console.warn('[ExpertAnalysis] Claude analysis failed, falling back to Gemini:', claudeErr);
+    }
+  }
+
+  // Fallback to Gemini 2.5 Flash
+  const googleApiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!googleApiKey) {
+    throw new Error('Neither Anthropic nor Google Gemini API key available');
+  }
 
   try {
-    // Extraer JSON aunque venga envuelto en ```json ... ```
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(googleApiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+      }
+    });
+
+    const prompt = `${EXPERT_SYSTEM_PROMPT}
+
+Analiza el siguiente brief de campañas con alertas y responde ÚNICAMENTE con un JSON válido siguiendo este schema:
+
+${DAILY_JSON_SCHEMA}
+
+BRIEF:
+${brief}`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return [];
     const parsed = JSON.parse(jsonMatch[0]);
     return parsed.suggestions || [];
-  } catch {
-    console.error('[ExpertAnalysis] Failed to parse Claude response:', textBlock.text);
+  } catch (geminiErr) {
+    console.error('[ExpertAnalysis] Gemini analysis fallback failed:', geminiErr);
     return [];
   }
 }
@@ -126,36 +163,70 @@ export async function generateWeeklyReport(
   apiKey?: string
 ): Promise<WeeklyInsight | null> {
   const key = apiKey || process.env.ANTHROPIC_API_KEY;
-  if (!key) return null;
+  
+  if (key) {
+    try {
+      const client = new Anthropic({ apiKey: key });
 
-  const client = new Anthropic({ apiKey: key });
-
-  const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
-    max_tokens: 512,
-    system: EXPERT_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: `Genera el informe semanal estratégico basado en estos datos. Responde ÚNICAMENTE con JSON válido:
+      const response = await client.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 512,
+        system: EXPERT_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `Genera el informe semanal estratégico basado en estos datos. Responde ÚNICAMENTE con JSON válido:
 
 ${WEEKLY_JSON_SCHEMA}
 
 DATOS SEMANALES:
 ${weeklyBrief}`,
-      },
-    ],
-  });
+          },
+        ],
+      });
 
-  const textBlock = response.content.find(c => c.type === 'text');
-  if (!textBlock || textBlock.type !== 'text') return null;
+      const textBlock = response.content.find(c => c.type === 'text');
+      if (textBlock && textBlock.type === 'text') {
+        const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+      }
+    } catch (claudeErr) {
+      console.warn('[ExpertAnalysis] Claude weekly report failed, falling back to Gemini:', claudeErr);
+    }
+  }
+
+  // Fallback to Gemini 2.5 Flash
+  const googleApiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  if (!googleApiKey) return null;
 
   try {
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(googleApiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+      }
+    });
+
+    const prompt = `${EXPERT_SYSTEM_PROMPT}
+
+Genera el informe semanal estratégico basado en estos datos. Responde ÚNICAMENTE con un JSON válido siguiendo este schema:
+
+${WEEKLY_JSON_SCHEMA}
+
+DATOS SEMANALES:
+${weeklyBrief}`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     return JSON.parse(jsonMatch[0]);
-  } catch {
-    console.error('[ExpertAnalysis] Failed to parse weekly report:', textBlock.text);
+  } catch (geminiErr) {
+    console.error('[ExpertAnalysis] Gemini weekly report fallback failed:', geminiErr);
     return null;
   }
 }

@@ -83,7 +83,32 @@ export async function getClient(clientId: string) {
     .eq('id', clientId)
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (error.code === 'PGRST205') {
+      // Fallback a profiles
+      const { data: profile, error: pError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', clientId)
+        .single();
+        
+      if (pError) throw pError;
+      
+      return {
+        id: profile.id,
+        user_id: profile.id,
+        name: 'Cliente Principal (Fallback)',
+        meta_access_token: profile.meta_access_token,
+        meta_ad_account_id: profile.meta_ad_account_id,
+        anthropic_api_key: profile.anthropic_api_key,
+        google_sheets_id: null,
+        settings: {},
+        created_at: profile.created_at,
+        updated_at: profile.updated_at
+      };
+    }
+    throw error;
+  }
   return data;
 }
 
@@ -95,17 +120,63 @@ export async function updateClient(clientId: string, updates: any) {
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (error.code === 'PGRST205') {
+      // Fallback a profiles
+      const profileUpdates: any = { updated_at: new Date().toISOString() };
+      if (updates.meta_access_token !== undefined) profileUpdates.meta_access_token = updates.meta_access_token;
+      if (updates.meta_ad_account_id !== undefined) profileUpdates.meta_ad_account_id = updates.meta_ad_account_id;
+      if (updates.anthropic_api_key !== undefined) profileUpdates.anthropic_api_key = updates.anthropic_api_key;
+      
+      const { data: profile, error: pError } = await supabase
+        .from('profiles')
+        .update(profileUpdates)
+        .eq('id', clientId)
+        .select()
+        .single();
+
+      if (pError) throw pError;
+
+      return {
+        id: profile.id,
+        user_id: profile.id,
+        name: 'Cliente Principal (Fallback)',
+        meta_access_token: profile.meta_access_token,
+        meta_ad_account_id: profile.meta_ad_account_id,
+        anthropic_api_key: profile.anthropic_api_key,
+        google_sheets_id: null,
+        settings: {},
+        created_at: profile.created_at,
+        updated_at: profile.updated_at
+      };
+    }
+    throw error;
+  }
   return data;
 }
 
 export async function getClientRules(clientId: string): Promise<AutomationRule[]> {
-  const { data, error } = await supabase
+  let data, error;
+  const res = await supabase
     .from('automation_rules')
     .select('*')
     .eq('client_id', clientId);
+    
+  data = res.data;
+  error = res.error;
 
-  if (error) throw error;
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbRes = await supabase
+        .from('automation_rules')
+        .select('*')
+        .eq('user_id', clientId);
+      data = fbRes.data;
+      if (fbRes.error) throw fbRes.error;
+    } else {
+      throw error;
+    }
+  }
   
   return (data || []).map(row => ({
     id: row.id,
@@ -123,21 +194,27 @@ export async function getClientRules(clientId: string): Promise<AutomationRule[]
 }
 
 export async function saveAutomationLog(clientId: string, result: RuleEvaluationResult) {
-  const { error } = await supabase
-    .from('automation_logs')
-    .insert({
-      rule_id: result.ruleId.startsWith('default-') ? null : result.ruleId,
-      client_id: clientId,
-      entity_id: result.entityId,
-      entity_name: result.entityName,
-      triggered: result.triggered,
-      action_taken: result.triggered ? result.action : null,
-      metrics_at_trigger: result.metrics,
-      error_message: result.error,
-      created_at: result.timestamp
-    });
+  const payload = {
+    rule_id: result.ruleId.startsWith('default-') ? null : result.ruleId,
+    client_id: clientId,
+    entity_id: result.entityId,
+    entity_name: result.entityName,
+    triggered: result.triggered,
+    action_taken: result.triggered ? result.action : null,
+    metrics_at_trigger: result.metrics,
+    error_message: result.error,
+    created_at: result.timestamp
+  };
+
+  const { error } = await supabase.from('automation_logs').insert(payload);
 
   if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbPayload = { ...payload, user_id: clientId };
+      delete (fbPayload as any).client_id;
+      await supabase.from('automation_logs').insert(fbPayload);
+      return;
+    }
     console.error('Error saving automation log:', error);
   }
 }
@@ -173,15 +250,24 @@ export async function saveCampaignSnapshot(clientId: string, snapshot: {
   conversions: number;
   roas: number;
 }) {
-  const { error } = await supabase
-    .from('campaign_snapshots')
-    .insert({
-      client_id: clientId,
-      ...snapshot,
-      snapshot_date: new Date().toISOString().split('T')[0]
-    });
+  const payload = {
+    client_id: clientId,
+    ...snapshot,
+    snapshot_date: new Date().toISOString().split('T')[0]
+  };
 
-  if (error) throw error;
+  const { error } = await supabase.from('campaign_snapshots').insert(payload);
+
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbPayload = { ...payload, user_id: clientId };
+      delete (fbPayload as any).client_id;
+      const { error: fbError } = await supabase.from('campaign_snapshots').insert(fbPayload);
+      if (fbError) throw fbError;
+      return;
+    }
+    throw error;
+  }
 }
 
 // ─── Monitoring Schedule ──────────────────────────────────────────────────────
@@ -193,7 +279,16 @@ export async function upsertMonitoringSchedule(
   const { error } = await supabase
     .from('monitoring_schedule')
     .upsert({ client_id: clientId, ...updates, updated_at: new Date().toISOString() }, { onConflict: 'client_id' });
-  if (error) console.error('upsertMonitoringSchedule error:', error.message);
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const { error: fbError } = await supabase
+        .from('monitoring_schedule')
+        .upsert({ user_id: clientId, ...updates, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      if (fbError) console.error('upsertMonitoringSchedule fallback error:', fbError.message);
+      return;
+    }
+    console.error('upsertMonitoringSchedule error:', error.message);
+  }
 }
 
 export async function getMonitoringSchedule(clientId: string): Promise<MonitoringScheduleRow | null> {
@@ -202,7 +297,18 @@ export async function getMonitoringSchedule(clientId: string): Promise<Monitorin
     .select('*')
     .eq('client_id', clientId)
     .single();
-  if (error && error.code !== 'PGRST116') throw error;
+  if (error && error.code !== 'PGRST116') {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const { data: fbData, error: fbError } = await supabase
+        .from('monitoring_schedule')
+        .select('*')
+        .eq('user_id', clientId)
+        .single();
+      if (fbError && fbError.code !== 'PGRST116') throw fbError;
+      return fbData;
+    }
+    throw error;
+  }
   return data;
 }
 
@@ -218,23 +324,48 @@ export async function createNotification(
     report_data?: Record<string, unknown>;
   }
 ): Promise<string> {
-  const { data, error } = await supabase
+  const payload = { client_id: clientId, ...notification };
+  let { data, error } = await supabase
     .from('agent_notifications')
-    .insert({ client_id: clientId, ...notification })
+    .insert(payload)
     .select('id')
     .single();
-  if (error) throw error;
-  return data.id;
+    
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbPayload = { ...notification, user_id: clientId };
+      const fbRes = await supabase.from('agent_notifications').insert(fbPayload).select('id').single();
+      if (fbRes.error) throw fbRes.error;
+      data = fbRes.data;
+    } else {
+      throw error;
+    }
+  }
+  return data?.id || '';
 }
 
 export async function getNotifications(clientId: string, limit = 50): Promise<NotificationRow[]> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('agent_notifications')
     .select('*')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false })
     .limit(limit);
-  if (error) throw error;
+    
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbRes = await supabase
+        .from('agent_notifications')
+        .select('*')
+        .eq('user_id', clientId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (fbRes.error) throw fbRes.error;
+      data = fbRes.data;
+    } else {
+      throw error;
+    }
+  }
   return data || [];
 }
 
@@ -247,13 +378,22 @@ export async function markNotificationRead(notificationId: string) {
 }
 
 export async function getUnreadCount(clientId: string): Promise<number> {
-  const { count, error } = await supabase
+  let res = await supabase
     .from('agent_notifications')
     .select('*', { count: 'exact', head: true })
     .eq('client_id', clientId)
     .eq('status', 'unread');
-  if (error) return 0;
-  return count || 0;
+    
+  if (res.error && (res.error.message.includes('client_id') || res.error.code === 'PGRST200')) {
+    res = await supabase
+      .from('agent_notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', clientId)
+      .eq('status', 'unread');
+  }
+  
+  if (res.error) return 0;
+  return res.count || 0;
 }
 
 // ─── Suggestions ──────────────────────────────────────────────────────────────
@@ -279,17 +419,43 @@ export async function saveSuggestions(
     metrics_snapshot: metricsSnapshot,
   }));
   const { error } = await supabase.from('agent_suggestions').insert(rows);
-  if (error) throw error;
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbRows = rows.map(r => {
+        const row = { ...r, user_id: r.client_id };
+        delete (row as any).client_id;
+        return row;
+      });
+      const { error: fbError } = await supabase.from('agent_suggestions').insert(fbRows);
+      if (fbError) throw fbError;
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function getSuggestions(clientId: string, status = 'pending'): Promise<SuggestionRow[]> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('agent_suggestions')
     .select('*')
     .eq('client_id', clientId)
     .eq('status', status)
     .order('created_at', { ascending: false });
-  if (error) throw error;
+    
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbRes = await supabase
+        .from('agent_suggestions')
+        .select('*')
+        .eq('user_id', clientId)
+        .eq('status', status)
+        .order('created_at', { ascending: false });
+      if (fbRes.error) throw fbRes.error;
+      data = fbRes.data;
+    } else {
+      throw error;
+    }
+  }
   return data || [];
 }
 
@@ -332,7 +498,29 @@ export async function getAllActiveClients(): Promise<Array<{
     .select('id, user_id, name, meta_access_token, meta_ad_account_id, anthropic_api_key, settings')
     .not('meta_access_token', 'is', null)
     .not('meta_ad_account_id', 'is', null);
-  if (error) throw error;
+    
+  if (error) {
+    if (error.code === 'PGRST205') {
+      const { data: profiles, error: pError } = await client
+        .from('profiles')
+        .select('id, meta_access_token, meta_ad_account_id, anthropic_api_key')
+        .not('meta_access_token', 'is', null)
+        .not('meta_ad_account_id', 'is', null);
+        
+      if (pError) throw pError;
+      
+      return (profiles || []).map(p => ({
+        id: p.id,
+        user_id: p.id,
+        name: 'Cliente Principal (Fallback)',
+        meta_access_token: p.meta_access_token,
+        meta_ad_account_id: p.meta_ad_account_id,
+        anthropic_api_key: p.anthropic_api_key,
+        settings: {}
+      }));
+    }
+    throw error;
+  }
   return (data || []) as any[];
 }
 
@@ -351,17 +539,39 @@ export async function logAgentActivity(log: {
   const { error } = await client
     .from('agent_execution_logs')
     .insert(log);
-  if (error) console.error('logAgentActivity error:', error.message);
+  if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fallbackLog = { ...log, user_id: log.client_id };
+      delete (fallbackLog as any).client_id;
+      await client.from('agent_execution_logs').insert(fallbackLog);
+      return;
+    }
+    console.error('logAgentActivity error:', error.message);
+  }
 }
 
 export async function getAgentLogs(clientId: string, limit = 50): Promise<ExecutionLogRow[]> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('agent_execution_logs')
     .select('*')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false })
     .limit(limit);
+    
   if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200') {
+      const fbRes = await supabase
+        .from('agent_execution_logs')
+        .select('*')
+        .eq('user_id', clientId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (fbRes.error) {
+        console.error('getAgentLogs error:', fbRes.error.message);
+        return [];
+      }
+      return fbRes.data || [];
+    }
     console.error('getAgentLogs error:', error.message);
     return [];
   }
@@ -369,12 +579,16 @@ export async function getAgentLogs(clientId: string, limit = 50): Promise<Execut
 }
 
 export async function getCostSummary(clientId: string): Promise<CostSummaryRow[]> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('agent_cost_summary')
     .select('*')
     .eq('client_id', clientId)
     .order('day', { ascending: false });
+    
   if (error) {
+    if (error.message.includes('client_id') || error.code === 'PGRST200' || error.code === 'PGRST205') {
+      return []; // Fallback empty if view fails
+    }
     console.error('getCostSummary error:', error.message);
     return [];
   }
