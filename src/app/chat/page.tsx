@@ -149,6 +149,21 @@ export default function ChatPage() {
           includeContext: true,
         }),
       });
+
+      if (!res.ok) {
+        let errMessage = `Error HTTP: ${res.status} ${res.statusText}`;
+        try {
+          const errData = await res.json();
+          if (errData.error) errMessage = errData.error;
+        } catch (e) {
+          // If it's HTML (like a 504 Gateway Timeout), res.json() will fail
+          if (res.status === 504) {
+            errMessage = 'El agente tardó demasiado en responder (Timeout 504). Intenta con una consulta más sencilla.';
+          }
+        }
+        throw new Error(errMessage);
+      }
+
       const data = await res.json();
 
       if (data.error) throw new Error(data.error);
