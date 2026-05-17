@@ -73,10 +73,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Prepare messages for Anthropic API
-    const anthropicMessages = messages.map((m: { role: string; content: string }) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }));
+    const anthropicMessages = messages.reduce((acc: any[], m: any) => {
+      if (acc.length === 0 && m.role !== 'user') return acc;
+      acc.push({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      });
+      return acc;
+    }, []);
 
     const tools: Anthropic.Tool[] = [
       {
