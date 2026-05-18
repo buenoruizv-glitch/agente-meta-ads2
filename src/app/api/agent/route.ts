@@ -11,10 +11,10 @@ async function getMetaConfig(req: NextRequest) {
   const { client } = await getAuthenticatedClient(req);
   
   return {
-    token: client.meta_access_token || process.env.META_ACCESS_TOKEN,
-    adAccountId: client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID,
-    pixelId: client.meta_pixel_id || process.env.META_PIXEL_ID,
-    pageId: client.meta_page_id || process.env.META_PAGE_ID
+    token: (client.meta_access_token || process.env.META_ACCESS_TOKEN || '').trim(),
+    adAccountId: (client.meta_ad_account_id || process.env.META_AD_ACCOUNT_ID || '').trim(),
+    pixelId: (client.meta_pixel_id || process.env.META_PIXEL_ID || '').trim(),
+    pageId: (client.meta_page_id || process.env.META_PAGE_ID || '').trim(),
   };
 }
 
