@@ -23,7 +23,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-async function enrichContext(metaConfig: ReturnType<typeof getMetaConfig> extends Promise<infer T> ? T : never): Promise<string> {
+async function enrichContext(metaConfig: Awaited<ReturnType<typeof getMetaConfig>>): Promise<string> {
   try {
     const [campaignsData, accountInsights] = await Promise.allSettled([
       withTimeout(getCampaigns(metaConfig), 8000),
@@ -61,7 +61,7 @@ async function enrichContext(metaConfig: ReturnType<typeof getMetaConfig> extend
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_campaign_draft',
-    description: 'Create a new Meta Ads campaign in DRAFT (PAUSED) mode. Call this when the user explicitly asks to create a campaign.',
+    description: 'Create a new Meta Ads campaign in DRAFT (PAUSED) mode. For multiple campaigns, call this tool multiple times in sequence.',
     input_schema: {
       type: 'object',
       properties: {
@@ -86,13 +86,17 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-async function runCampaignTool(params: any, metaConfig: any) {
-  const payload = {
-    ...params,
-    pageId: metaConfig.pageId,
-    imageUrl: params.imageUrl || 'https://via.placeholder.com/1080x1080.png?text=Anuncio',
-  };
-  return createCampaignDraftService(payload, metaConfig);
+async function executeTool(name: string, params: any, metaConfig: Awaited<ReturnType<typeof getMetaConfig>>) {
+  if (name === 'create_campaign_draft') {
+    const payload = {
+      ...params,
+      pageId: metaConfig.pageId,
+      imageUrl: params.imageUrl || 'https://via.placeholder.com/1080x1080.png?text=Anuncio',
+    };
+    const res = await createCampaignDraftService(payload, metaConfig);
+    return { success: true, campaignId: res.campaign.id, adSetId: res.adSet.id, adId: res.ad.id };
+  }
+  throw new Error(`Unknown tool: ${name}`);
 }
 
 export async function POST(req: NextRequest) {
@@ -117,12 +121,66 @@ export async function POST(req: NextRequest) {
     const preferredModel = userSettings.preferredModel || 'claude';
 
     let responseText = '';
-    let stopReason = '';
     let usage = {};
     let currentModel = preferredModel;
 
     for (let attempt = 0; attempt < 2 && !responseText; attempt++) {
-      if (currentModel === 'gemini') {
+
+      // ─── CLAUDE (agentic loop) ──────────────────────────────────────────────
+      if (currentModel === 'claude') {
+        if (!anthropicApiKey) { currentModel = 'gemini'; continue; }
+        try {
+          const anthropicClient = new Anthropic({ apiKey: anthropicApiKey as string });
+
+          const msgs: any[] = messages.reduce((acc: any[], m: any) => {
+            if (acc.length === 0 && m.role !== 'user') return acc;
+            const last = acc[acc.length - 1];
+            if (last?.role === m.role) { last.content += '\n\n' + m.content; }
+            else { acc.push({ role: m.role as 'user' | 'assistant', content: m.content }); }
+            return acc;
+          }, []);
+
+          // Agentic loop — keeps going until no more tool calls (max 15 iterations)
+          for (let iter = 0; iter < 15; iter++) {
+            const response = await anthropicClient.messages.create({
+              model: 'claude-sonnet-4-6',
+              max_tokens: 2048,
+              system: systemPrompt,
+              messages: msgs,
+              tools: TOOLS,
+            });
+
+            usage = response.usage;
+
+            if (response.stop_reason !== 'tool_use') {
+              const textBlock = response.content.find(c => c.type === 'text') as Anthropic.TextBlock | undefined;
+              responseText = textBlock?.text || '';
+              break;
+            }
+
+            // Process all tool calls in this response
+            msgs.push({ role: 'assistant', content: response.content });
+            const toolResults: any[] = [];
+
+            const toolUses = response.content.filter(c => c.type === 'tool_use') as Anthropic.ToolUseBlock[];
+            for (const tu of toolUses) {
+              try {
+                const result = await executeTool(tu.name, tu.input, metaConfig);
+                toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result) });
+              } catch (err: any) {
+                toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ error: err?.message || String(err) }), is_error: true });
+              }
+            }
+
+            msgs.push({ role: 'user', content: toolResults });
+          }
+        } catch (err) {
+          console.error('[Agent] Claude failed:', err);
+          currentModel = 'gemini';
+        }
+
+      // ─── GEMINI (agentic loop) ──────────────────────────────────────────────
+      } else {
         if (!googleApiKey) { currentModel = 'claude'; continue; }
         try {
           const { GoogleGenerativeAI } = await import('@google/generative-ai');
@@ -150,86 +208,34 @@ export async function POST(req: NextRequest) {
           }, []);
 
           const chat = model.startChat({ history });
-          let result = await chat.sendMessage(messages[messages.length - 1].content);
-          let response = result.response;
-          const call = response.functionCalls()?.[0];
 
-          if (call?.name === 'create_campaign_draft') {
-            let toolResult: any;
-            try {
-              const res = await runCampaignTool(call.args, metaConfig);
-              toolResult = { functionResponse: { name: call.name, response: { success: true, campaignId: res.campaign.id } } };
-            } catch (err: any) {
-              toolResult = { functionResponse: { name: call.name, response: { error: err?.message || String(err) } } };
+          // Agentic loop for Gemini
+          let nextMessage: any = messages[messages.length - 1].content;
+          for (let iter = 0; iter < 15; iter++) {
+            const result = await chat.sendMessage(nextMessage);
+            const response = result.response;
+            const calls = response.functionCalls() || [];
+
+            if (calls.length === 0) {
+              responseText = response.text();
+              break;
             }
-            result = await chat.sendMessage([toolResult] as any);
-            response = result.response;
-          }
 
-          responseText = response.text();
-          stopReason = 'end_turn';
+            // Execute all tool calls and build tool result message
+            const toolResultParts: any[] = [];
+            for (const call of calls) {
+              try {
+                const res = await executeTool(call.name, call.args, metaConfig);
+                toolResultParts.push({ functionResponse: { name: call.name, response: res } });
+              } catch (err: any) {
+                toolResultParts.push({ functionResponse: { name: call.name, response: { error: err?.message || String(err) } } });
+              }
+            }
+            nextMessage = toolResultParts;
+          }
         } catch (err) {
           console.error('[Agent] Gemini failed:', err);
           currentModel = 'claude';
-        }
-      } else {
-        if (!anthropicApiKey) { currentModel = 'gemini'; continue; }
-        try {
-          const anthropicClient = new Anthropic({ apiKey: anthropicApiKey as string });
-
-          const anthropicMessages = messages.reduce((acc: any[], m: any) => {
-            if (acc.length === 0 && m.role !== 'user') return acc;
-            const last = acc[acc.length - 1];
-            if (last?.role === m.role) { last.content += '\n\n' + m.content; }
-            else { acc.push({ role: m.role as 'user' | 'assistant', content: m.content }); }
-            return acc;
-          }, []);
-
-          const response = await anthropicClient.messages.create({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 2048,
-            system: systemPrompt,
-            messages: anthropicMessages,
-            tools: TOOLS,
-          });
-
-          if (response.stop_reason === 'tool_use') {
-            const toolUses = response.content.filter(c => c.type === 'tool_use') as Anthropic.ToolUseBlock[];
-            anthropicMessages.push({ role: 'assistant', content: response.content } as any);
-            const toolResults: any[] = [];
-
-            for (const tu of toolUses) {
-              if (tu.name === 'create_campaign_draft') {
-                try {
-                  const res = await runCampaignTool(tu.input, metaConfig);
-                  toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ success: true, campaignId: res.campaign.id }) });
-                } catch (err: any) {
-                  toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ error: err?.message || String(err) }), is_error: true });
-                }
-              }
-            }
-
-            anthropicMessages.push({ role: 'user', content: toolResults } as any);
-            const final = await anthropicClient.messages.create({
-              model: 'claude-sonnet-4-6',
-              max_tokens: 2048,
-              system: systemPrompt,
-              messages: anthropicMessages,
-              tools: TOOLS,
-            });
-            const textBlock = final.content.find(c => c.type === 'text') as Anthropic.TextBlock;
-            responseText = textBlock?.text || '';
-            usage = final.usage;
-            stopReason = final.stop_reason || '';
-          } else {
-            const textBlock = response.content.find(c => c.type === 'text') as Anthropic.TextBlock;
-            responseText = textBlock?.text || '';
-            usage = response.usage;
-            stopReason = response.stop_reason || '';
-          }
-        } catch (err) {
-          console.error('[Agent] Claude failed:', err);
-          currentModel = 'gemini';
         }
       }
     }
@@ -238,7 +244,7 @@ export async function POST(req: NextRequest) {
       throw new Error('No se pudo obtener respuesta del agente. Verifica las API Keys.');
     }
 
-    return NextResponse.json({ message: responseText, usage, stopReason });
+    return NextResponse.json({ message: responseText, usage });
   } catch (err) {
     console.error('[Agent API] Error:', err);
     const message = err instanceof Error ? err.message : 'Internal server error';
