@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
  * DELETE THIS FILE after debugging is complete.
  * Usage: GET /api/debug-agent
  */
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const checks: Record<string, any> = {};
 
   // 1. Check environment variables
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
       const Anthropic = (await import('@anthropic-ai/sdk')).default;
       const client = new Anthropic({ apiKey: anthropicKey });
       const response = await client.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-4-6',
         max_tokens: 10,
         messages: [{ role: 'user', content: 'Say OK' }],
       });
