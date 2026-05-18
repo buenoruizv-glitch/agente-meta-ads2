@@ -99,12 +99,34 @@ export default function ChatPage() {
     if (!e.target.files || e.target.files.length === 0) return;
     setUploading(true);
     try {
-      const formData = new FormData();
-      Array.from(e.target.files).forEach(f => formData.append('files', f));
-      const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
+      const selectedFiles = Array.from(e.target.files);
+
+      // Step 1: get signed upload URLs from our API (no file data sent to Vercel)
+      const res = await apiFetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: selectedFiles.map(f => ({ name: f.name, type: f.type, size: f.size })),
+        }),
+      });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setUploadedFiles(prev => [...prev, ...data.files]);
+
+      // Step 2: upload each file directly to Supabase Storage (bypasses Vercel size limit)
+      const uploaded = await Promise.all(
+        data.files.map(async (meta: { signedUrl: string; publicUrl: string; name: string; type: string; size: number }, i: number) => {
+          const file = selectedFiles[i];
+          const uploadRes = await fetch(meta.signedUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file,
+          });
+          if (!uploadRes.ok) throw new Error(`Error subiendo ${file.name}: ${uploadRes.statusText}`);
+          return { name: meta.name, url: meta.publicUrl, type: meta.type, size: meta.size };
+        })
+      );
+
+      setUploadedFiles(prev => [...prev, ...uploaded]);
     } catch (err) {
       alert(`Error al subir archivos: ${err instanceof Error ? err.message : 'Error desconocido'}`);
     } finally {
