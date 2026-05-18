@@ -7,8 +7,6 @@ import { getCampaigns, getAccountInsights, calculateKPIs } from '@/lib/meta-api'
 import { getAuthenticatedClient } from '@/lib/api-utils';
 import { createCampaignDraftService } from '@/lib/meta-campaign-service';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
 async function getMetaConfig(req: NextRequest) {
   const { client } = await getAuthenticatedClient(req);
   
@@ -229,7 +227,7 @@ export async function POST(req: NextRequest) {
         try {
           const anthropicClient = new Anthropic({ apiKey: anthropicApiKey });
           const response = await anthropicClient.messages.create({
-            model: 'claude-3-5-sonnet-20241022',
+            model: 'claude-sonnet-4-6',
             max_tokens: 4096,
             system: systemPrompt,
             messages: anthropicMessages,
@@ -270,7 +268,7 @@ export async function POST(req: NextRequest) {
 
               anthropicMessages.push({ role: 'user', content: toolResults } as any);
               const finalRes = await anthropicClient.messages.create({
-                model: 'claude-3-5-sonnet-20241022',
+                model: 'claude-sonnet-4-6',
                 max_tokens: 4096,
                 system: systemPrompt,
                 messages: anthropicMessages,
