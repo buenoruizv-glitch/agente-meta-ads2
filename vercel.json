@@ -8,5 +8,10 @@
       "path": "/api/cron/weekly",
       "schedule": "0 6 * * 1"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/agent/route.ts": {
+      "maxDuration": 300
+    }
+  }
 }
