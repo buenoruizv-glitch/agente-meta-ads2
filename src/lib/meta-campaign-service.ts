@@ -260,14 +260,17 @@ export async function createCampaignDraftService(
         throw new Error(`Error al subir el video a Meta: ${err.message}`);
       }
     }
-    
+
+    // Meta auto-generates a thumbnail from the video — no manual thumbnail needed.
+    // title is shown as overlay text in some placements.
     objectStorySpec.video_data = {
       video_id: videoId,
+      title: headline,
       message: primaryText,
       call_to_action: {
         type: 'LEARN_MORE',
-        value: { link: linkUrl }
-      }
+        value: { link: linkUrl },
+      },
     };
   } else {
     const linkData: Record<string, unknown> = {
