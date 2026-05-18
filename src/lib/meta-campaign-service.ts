@@ -23,13 +23,16 @@ interface DraftCampaignPayload {
   videoId?: string;
   linkUrl: string;
   pageId: string;
+  // Reuse existing campaign/adset to add more ads without creating duplicates
+  existingCampaignId?: string;
+  existingAdSetId?: string;
   // Advanced targeting
-  locations?: string[]; // e.g. ["Murcia"]
-  radius?: number; // e.g. 40
+  locations?: string[];
+  radius?: number;
   ageMin?: number;
   ageMax?: number;
-  interests?: string[]; // e.g. ["Camping", "Travel"]
-  placements?: string[]; // e.g. ["FEED", "STORIES", "REELS"]
+  interests?: string[];
+  placements?: string[];
 }
 
 // Map objective → safe optimization_goal + billing_event
@@ -96,6 +99,7 @@ export async function createCampaignDraftService(
     campaignName, objective,
     adSetName, dailyBudget, billingEvent, optimizationGoal,
     adName, primaryText, headline, imageUrl, videoId: existingVideoId, linkUrl, pageId,
+    existingCampaignId, existingAdSetId,
     locations, radius, ageMin, ageMax, interests, placements
   } = payload;
 
@@ -103,17 +107,22 @@ export async function createCampaignDraftService(
     throw new Error('Page ID is required to create an Ad Creative');
   }
 
-  // 1. Create Campaign
-  const campaignResult = await createCampaign({
-    name: campaignName,
-    objective: objective,
-    status: 'PAUSED',
-    special_ad_categories: ['NONE'],
-    is_adset_budget_sharing_enabled: false,
-  }, metaConfig);
-
-  const campaignId = campaignResult.id;
   const { optimization_goal, billing_event } = getOptimizationDefaults(objective, optimizationGoal);
+
+  // 1. Campaign — reuse existing or create new
+  let campaignId = existingCampaignId;
+  let campaignResult: any = existingCampaignId ? { id: existingCampaignId } : null;
+
+  if (!campaignId) {
+    campaignResult = await createCampaign({
+      name: campaignName,
+      objective: objective,
+      status: 'PAUSED',
+      special_ad_categories: ['NONE'],
+      is_adset_budget_sharing_enabled: false,
+    }, metaConfig);
+    campaignId = campaignResult.id;
+  }
 
   // 2. Build Targeting
   const targeting: Record<string, any> = {
@@ -218,31 +227,37 @@ export async function createCampaignDraftService(
   }
 
   // 3. Create Ad Set
-  const adSetPayload: Record<string, unknown> = {
-    name: adSetName,
-    campaign_id: campaignId,
-    daily_budget: Math.round(dailyBudget * 100),
-    billing_event: billingEvent || billing_event,
-    optimization_goal: optimization_goal,
-    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    targeting: targeting,
-    status: 'PAUSED',
-  };
+  // 3. AdSet — reuse existing or create new
+  let adSetId = existingAdSetId;
+  let adSetResult: any = existingAdSetId ? { id: existingAdSetId } : null;
 
-  if (optimization_goal === 'OFFSITE_CONVERSIONS') {
-    if (!metaConfig.pixelId) {
-      adSetPayload.optimization_goal = 'LINK_CLICKS';
-      adSetPayload.billing_event = 'IMPRESSIONS';
-    } else {
-      adSetPayload.promoted_object = {
-        pixel_id: metaConfig.pixelId,
-        custom_event_type: 'PURCHASE',
-      };
+  if (!adSetId) {
+    const adSetPayload: Record<string, unknown> = {
+      name: adSetName,
+      campaign_id: campaignId,
+      daily_budget: Math.round(dailyBudget * 100),
+      billing_event: billingEvent || billing_event,
+      optimization_goal: optimization_goal,
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      targeting: targeting,
+      status: 'PAUSED',
+    };
+
+    if (optimization_goal === 'OFFSITE_CONVERSIONS') {
+      if (!metaConfig.pixelId) {
+        adSetPayload.optimization_goal = 'LINK_CLICKS';
+        adSetPayload.billing_event = 'IMPRESSIONS';
+      } else {
+        adSetPayload.promoted_object = {
+          pixel_id: metaConfig.pixelId,
+          custom_event_type: 'PURCHASE',
+        };
+      }
     }
-  }
 
-  const adSetResult = await createAdSet(adSetPayload, metaConfig);
-  const adSetId = adSetResult.id;
+    adSetResult = await createAdSet(adSetPayload, metaConfig);
+    adSetId = adSetResult.id;
+  }
 
   // 4. Creative Handling (Detect Video vs Image)
   const isVideo = (imageUrl && /\.(mp4|mov|avi|m4v|webm)(\?.*)?$/i.test(imageUrl)) || !!existingVideoId;

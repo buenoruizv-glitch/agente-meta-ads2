@@ -80,6 +80,8 @@ const TOOLS: Anthropic.Tool[] = [
         ageMax: { type: 'number' },
         interests: { type: 'array', items: { type: 'string' } },
         placements: { type: 'array', items: { type: 'string' }, description: 'e.g. ["FEED","STORIES","REELS"]' },
+        existingCampaignId: { type: 'string', description: 'ID of an existing campaign to add this ad to. Use this to add multiple ads to the same campaign instead of creating duplicates.' },
+        existingAdSetId: { type: 'string', description: 'ID of an existing ad set to add this ad to. Use together with existingCampaignId.' },
       },
       required: ['campaignName', 'objective', 'adSetName', 'dailyBudget', 'adName', 'primaryText', 'headline', 'linkUrl'],
     },
@@ -94,7 +96,14 @@ async function executeTool(name: string, params: any, metaConfig: Awaited<Return
       imageUrl: params.imageUrl || 'https://via.placeholder.com/1080x1080.png?text=Anuncio',
     };
     const res = await createCampaignDraftService(payload, metaConfig);
-    return { success: true, campaignId: res.campaign.id, adSetId: res.adSet.id, adId: res.ad.id };
+    return {
+      success: true,
+      campaignId: res.campaign.id,
+      adSetId: res.adSet.id,
+      adId: res.ad.id,
+      // Agent must reuse these IDs for additional ads in the same campaign
+      reuseHint: `To add more ads to this campaign, pass existingCampaignId="${res.campaign.id}" and existingAdSetId="${res.adSet.id}"`,
+    };
   }
   throw new Error(`Unknown tool: ${name}`);
 }
