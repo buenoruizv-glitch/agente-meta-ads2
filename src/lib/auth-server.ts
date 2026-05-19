@@ -17,24 +17,14 @@ export async function verifyAuth(req: NextRequest) {
   }
 
   try {
-    console.log('verifyAuth - Verifying token with Supabase');
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    
-    if (error) {
-      console.error('verifyAuth - Supabase error:', error.message);
-      return null;
-    }
-    if (!user) {
-      console.log('verifyAuth - No user found for token');
-      return null;
-    }
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
+    const authCall = supabase.auth.getUser(token).then(({ data: { user }, error }) => {
+      if (error || !user) return null;
+      return { ...user, uid: user.id };
+    }).catch(() => null);
 
-    console.log('verifyAuth - User verified:', user.id);
-    // Return object compatible with existing code (expects uid)
-    return {
-      ...user,
-      uid: user.id,
-    };
+    const result = await Promise.race([authCall, timeout]);
+    return result;
   } catch (err) {
     console.error('verifyAuth - Unexpected error:', err);
     return null;

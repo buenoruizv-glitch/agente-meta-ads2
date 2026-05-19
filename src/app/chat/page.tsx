@@ -177,11 +177,8 @@ export default function ChatPage() {
         try {
           const errData = await res.json();
           if (errData.error) errMessage = errData.error;
-        } catch (e) {
-          // If it's HTML (like a 504 Gateway Timeout), res.json() will fail
-          if (res.status === 504) {
-            errMessage = 'El agente tardó demasiado en responder (Timeout 504). Intenta con una consulta más sencilla.';
-          }
+        } catch {
+          if (res.status === 504) errMessage = 'El agente tardó demasiado (Timeout 504). Intenta de nuevo.';
         }
         throw new Error(errMessage);
       }
@@ -198,7 +195,7 @@ export default function ChatPage() {
     } catch (err) {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `❌ Error al conectar con el agente: ${err instanceof Error ? err.message : 'Error desconocido'}. Por favor, verifica la configuración de tus API Keys en el archivo .env.local.`,
+        content: `❌ ${err instanceof Error ? err.message : 'Error desconocido al conectar con el agente.'}`,
         timestamp: new Date().toISOString(),
       }]);
     } finally {
