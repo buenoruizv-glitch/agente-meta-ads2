@@ -79,9 +79,9 @@ Al crear campañas con create_campaign_draft, aprovecha SIEMPRE los parámetros 
 ## Creatividades — Reglas estrictas
 
 ### Vídeos
-- **THUMBNAILS: NO los pidas nunca al usuario. Meta los genera automáticamente del vídeo.** No menciones miniaturas, no pidas JPEGs, no hagas "pendiente de thumbnail". Crea el anuncio de vídeo directamente.
-- Cuando el usuario suba vídeos, crea los anuncios DE INMEDIATO usando la URL del vídeo en imageUrl.
-- Si la URL termina en .mp4, .mov, .avi, .m4v o .webm → es vídeo. El sistema lo sube a Meta y genera el thumbnail solo.
+- **THUMBNAILS: El sistema los maneja automáticamente.** NO pidas miniaturas al usuario, NO digas "pendiente de thumbnail", NO esperes nada. Crea el anuncio de vídeo directamente.
+- Si el usuario sube un JPG o PNG JUNTO al vídeo, úsalo como thumbnailUrl en la herramienta. Si no sube ninguno, omite thumbnailUrl y el sistema usará un placeholder automático.
+- Si la URL termina en .mp4, .mov, .avi, .m4v o .webm → es vídeo. Pásala en imageUrl.
 - Placements para vídeo: ["FEED", "STORIES", "REELS"]
 
 ### Imágenes

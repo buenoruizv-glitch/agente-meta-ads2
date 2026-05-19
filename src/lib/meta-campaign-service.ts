@@ -20,6 +20,7 @@ interface DraftCampaignPayload {
   primaryText: string;
   headline: string;
   imageUrl?: string;
+  thumbnailUrl?: string; // explicit thumbnail for video ads; auto-generated if omitted
   videoId?: string;
   linkUrl: string;
   pageId: string;
@@ -98,7 +99,7 @@ export async function createCampaignDraftService(
   const {
     campaignName, objective,
     adSetName, dailyBudget, billingEvent, optimizationGoal,
-    adName, primaryText, headline, imageUrl, videoId: existingVideoId, linkUrl, pageId,
+    adName, primaryText, headline, imageUrl, thumbnailUrl, videoId: existingVideoId, linkUrl, pageId,
     existingCampaignId, existingAdSetId,
     locations, radius, ageMin, ageMax, interests, placements
   } = payload;
@@ -276,12 +277,25 @@ export async function createCampaignDraftService(
       }
     }
 
-    // Meta auto-generates a thumbnail from the video — no manual thumbnail needed.
-    // title is shown as overlay text in some placements.
+    // Meta requires image_url or image_hash in video_data.
+    // Use the provided thumbnail, or fall back to a 1x1 transparent placeholder
+    // that satisfies the API requirement while Meta processes the video.
+    const resolvedThumbnail =
+      thumbnailUrl ||
+      'https://upload.wikimedia.org/wikipedia/commons/c/ca/1x1.png';
+
+    let thumbnailHash: string | undefined;
+    try {
+      thumbnailHash = await uploadImageToMeta(resolvedThumbnail, metaConfig);
+    } catch {
+      // If upload fails, pass image_url directly — Meta will fetch it
+    }
+
     objectStorySpec.video_data = {
       video_id: videoId,
       title: headline,
       message: primaryText,
+      ...(thumbnailHash ? { image_hash: thumbnailHash } : { image_url: resolvedThumbnail }),
       call_to_action: {
         type: 'LEARN_MORE',
         value: { link: linkUrl },

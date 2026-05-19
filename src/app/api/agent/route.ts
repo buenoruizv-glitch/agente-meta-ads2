@@ -80,6 +80,7 @@ const TOOLS: Anthropic.Tool[] = [
         ageMax: { type: 'number' },
         interests: { type: 'array', items: { type: 'string' } },
         placements: { type: 'array', items: { type: 'string' }, description: 'e.g. ["FEED","STORIES","REELS"]' },
+        thumbnailUrl: { type: 'string', description: 'Thumbnail image URL for video ads. Optional — if omitted a default is used automatically. If the user uploads a JPG/PNG alongside the video, pass its URL here.' },
         existingCampaignId: { type: 'string', description: 'ID of an existing campaign to add this ad to. Use this to add multiple ads to the same campaign instead of creating duplicates.' },
         existingAdSetId: { type: 'string', description: 'ID of an existing ad set to add this ad to. Use together with existingCampaignId.' },
       },
