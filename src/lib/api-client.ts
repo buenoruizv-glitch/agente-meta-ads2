@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 
-export const apiFetch = async (url: string, options: RequestInit = {}, timeoutMs = 120_000) => {
+export const apiFetch = async (url: string, options: RequestInit = {}, timeoutMs = 270_000) => {
   const headers = new Headers(options.headers || {});
 
   if (typeof window !== 'undefined') {

@@ -52,12 +52,14 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>(defaultMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [activeCategory, setActiveCategory] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const loadingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const chatStorageKey = currentClient ? `meta_ads_chat_history_${currentClient.id}` : 'meta_ads_chat_history_guest';
 
@@ -161,6 +163,8 @@ export default function ChatPage() {
     setInput('');
     setUploadedFiles([]);
     setLoading(true);
+    setLoadingSeconds(0);
+    loadingTimerRef.current = setInterval(() => setLoadingSeconds(s => s + 1), 1000);
 
     try {
       const res = await apiFetch('/api/agent', {
@@ -200,6 +204,11 @@ export default function ChatPage() {
       }]);
     } finally {
       setLoading(false);
+      setLoadingSeconds(0);
+      if (loadingTimerRef.current) {
+        clearInterval(loadingTimerRef.current);
+        loadingTimerRef.current = null;
+      }
     }
   };
 
@@ -330,10 +339,17 @@ export default function ChatPage() {
           {loading && (
             <div className="chat-message animate-in">
               <div className="chat-avatar agent">🤖</div>
-              <div className="chat-bubble">
-                <div className="loading-dots">
-                  <span /><span /><span />
-                </div>
+              <div className="chat-bubble" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="loading-dots"><span /><span /><span /></div>
+                {loadingSeconds >= 5 && (
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                    {loadingSeconds < 30
+                      ? `Pensando... ${loadingSeconds}s`
+                      : loadingSeconds < 90
+                      ? `Creando campañas... ${loadingSeconds}s`
+                      : `Subiendo a Meta... ${loadingSeconds}s`}
+                  </span>
+                )}
               </div>
             </div>
           )}
