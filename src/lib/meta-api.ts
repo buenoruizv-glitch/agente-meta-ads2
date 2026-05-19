@@ -29,12 +29,22 @@ async function metaFetch(path: string, params: Record<string, string> = {}, meth
     const errorMsg = metaError.message || err?.message || `Meta API error ${res.status}`;
     const userMsg = metaError.error_user_msg || '';
     const userTitle = metaError.error_user_title || '';
-    
+
+    // Detect expired / invalid token explicitly
+    const isExpired =
+      metaError.code === 190 ||
+      /session has expired|access token.*expired|token.*invalid|OAuthException/i.test(errorMsg);
+    if (isExpired) {
+      throw new Error(
+        `TOKEN_EXPIRED: El token de Meta ha caducado. Ve a Configuración → Meta Token y genera uno nuevo en developers.facebook.com/tools/explorer`
+      );
+    }
+
     let detailedMsg = errorMsg;
     if (userTitle) detailedMsg = `${userTitle}: ${detailedMsg}`;
     if (userMsg) detailedMsg = `${detailedMsg} (${userMsg})`;
     if (metaError.fbtrace_id) detailedMsg = `${detailedMsg} [Trace ID: ${metaError.fbtrace_id}]`;
-    
+
     console.error(`[Meta API Error] ${method} ${path}:`, JSON.stringify(err, null, 2));
     throw new Error(detailedMsg);
   }

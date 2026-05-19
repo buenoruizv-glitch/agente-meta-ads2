@@ -10,12 +10,39 @@ import { getAllActiveClients, createNotification, getSuggestions } from '@/lib/d
 import { generateWeeklyReport } from '@/lib/expert-analysis';
 import { analyzeCampaigns } from '@/lib/automation-engine';
 
+async function checkTokenExpiry() {
+  const token = process.env.META_ACCESS_TOKEN;
+  if (!token) return;
+  try {
+    const res = await fetch(`https://graph.facebook.com/v19.0/debug_token?input_token=${token}&access_token=${token}`);
+    const data = await res.json();
+    const info = data?.data;
+    if (!info?.is_valid) {
+      console.error('[Cron Weekly] ⚠️ META_ACCESS_TOKEN CADUCADO. Renuévalo en Vercel.');
+      return;
+    }
+    if (info.expires_at) {
+      const daysLeft = Math.floor((info.expires_at * 1000 - Date.now()) / 86400000);
+      if (daysLeft < 14) {
+        console.warn(`[Cron Weekly] ⚠️ Token Meta caduca en ${daysLeft} días. Renuévalo pronto.`);
+      } else {
+        console.log(`[Cron Weekly] ✅ Token Meta válido. Caduca en ${daysLeft} días.`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Cron Weekly] No se pudo verificar el token Meta:', e);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  // Always check token health on weekly run
+  await checkTokenExpiry();
 
   const results: Array<{ clientId: string; status: string }> = [];
 
