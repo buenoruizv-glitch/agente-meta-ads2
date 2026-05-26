@@ -1,6 +1,5 @@
 'use client';
-export const dynamic = 'force-dynamic';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { apiFetch } from '@/lib/api-client';
@@ -259,7 +258,7 @@ function AdCard({ ad, placements, adSetName }: { ad: Ad; placements: string[]; a
 
 interface CampaignOption { id: string; name: string; status: string }
 
-export default function PreviewPage() {
+function PreviewPageInner() {
   const { currentClient } = useClient();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -501,5 +500,13 @@ export default function PreviewPage() {
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </AppLayout>
+  );
+}
+
+export default function PreviewPage() {
+  return (
+    <Suspense>
+      <PreviewPageInner />
+    </Suspense>
   );
 }
