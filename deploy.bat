@@ -41,7 +41,7 @@ if !errorlevel! neq 0 (
 
 echo.
 echo [2/2] Desplegando en Vercel...
-vercel --prod
+call vercel --prod
 if !errorlevel! neq 0 (
   echo.
   echo ERROR: Fallo el despliegue en Vercel.
