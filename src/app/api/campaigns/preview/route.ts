@@ -8,6 +8,28 @@ const FORMAT_MAP: Record<string, string> = {
   REELS: 'INSTAGRAM_REELS',
 };
 
+// Fetch the actual iframe page server-side so the client never touches Facebook cookies.
+// Strip SDK scripts that trigger the GDPR cookie consent popup.
+async function fetchPreviewSrcdoc(iframeHtml: string): Promise<string | null> {
+  const m = iframeHtml.match(/src=["']([^"']+)["']/);
+  if (!m) return null;
+  const src = m[1].replace(/&amp;/g, '&');
+  try {
+    const res = await fetch(src, { headers: { 'Accept': 'text/html', 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) return null;
+    let html = await res.text();
+    // Remove Facebook SDK script (the cookie consent trigger)
+    html = html.replace(/<script\b[^>]*(?:connect\.facebook\.net|staticxx\.facebook\.com)[^>]*>[\s\S]*?<\/script>/gi, '');
+    // Ensure relative URLs resolve against facebook.com
+    if (!/<base\b/i.test(html)) {
+      html = html.replace(/(<head\b[^>]*>)/i, '$1<base href="https://www.facebook.com/">');
+    }
+    return html;
+  } catch {
+    return null;
+  }
+}
+
 function parseCreative(creative: any) {
   const spec = creative?.object_story_spec || {};
   const isVideo = !!spec.video_data;
@@ -115,7 +137,10 @@ export async function GET(req: NextRequest) {
                 try {
                   const res = await getAdPreviews(ad.id, fmt, metaConfig);
                   const body: string = res?.data?.[0]?.body || '';
-                  if (body) previews[pl] = body;
+                  if (body) {
+                    const srcdoc = await fetchPreviewSrcdoc(body);
+                    if (srcdoc) previews[pl] = srcdoc;
+                  }
                 } catch { /* skip */ }
               })
             );

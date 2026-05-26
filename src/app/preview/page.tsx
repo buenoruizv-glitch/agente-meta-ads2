@@ -83,29 +83,22 @@ const DISPLAY_WIDTHS: Record<string, number> = {
   FEED: 320, STORIES: 210, REELS: 210,
 };
 
-function parseIframeSrc(html: string): string | null {
-  const m = html.match(/src=["']([^"']+)["']/);
-  return m ? m[1].replace(/&amp;/g, '&') : null;
-}
-
-function AdIframePreview({ iframeHtml, placement }: { iframeHtml: string; placement: string }) {
-  const src = parseIframeSrc(iframeHtml);
+function AdIframePreview({ srcdoc, placement }: { srcdoc: string; placement: string }) {
   const native = IFRAME_SIZES[placement] || { w: 476, h: 400 };
   const displayW = DISPLAY_WIDTHS[placement] || 320;
   const scale = displayW / native.w;
   const displayH = Math.round(native.h * scale);
 
-  if (!src) return null;
-
   return (
     <div style={{ width: displayW, height: displayH, overflow: 'hidden', borderRadius: '8px', boxShadow: '0 2px 12px rgba(0,0,0,0.3)', flexShrink: 0 }}>
       <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: native.w, height: native.h }}>
         <iframe
-          src={src}
+          srcDoc={srcdoc}
           width={native.w}
           height={native.h}
           frameBorder="0"
           scrolling="no"
+          sandbox="allow-scripts"
           style={{ display: 'block', border: 'none' }}
         />
       </div>
@@ -151,7 +144,7 @@ function AdCard({ ad, placements }: { ad: Ad; placements: string[] }) {
             return (
               <div key={pl} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>{PLACEMENT_LABELS[pl] || pl}</div>
-                <AdIframePreview iframeHtml={html} placement={pl} />
+                <AdIframePreview srcdoc={html} placement={pl} />
               </div>
             );
           })}
