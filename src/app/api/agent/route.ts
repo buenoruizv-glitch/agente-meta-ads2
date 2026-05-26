@@ -2,9 +2,9 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { AGENT_SYSTEM_PROMPT } from '@/lib/agent-prompts';
-import { getCampaigns, getAccountInsights, calculateKPIs } from '@/lib/meta-api';
+import { getCampaigns, getAccountInsights, calculateKPIs, getAdSets, getAds, getAdCreativeDetail } from '@/lib/meta-api';
 import { getAuthenticatedClient } from '@/lib/api-utils';
-import { createCampaignDraftService } from '@/lib/meta-campaign-service';
+import { createCampaignDraftService, updateAdSetService } from '@/lib/meta-campaign-service';
 
 async function getMetaConfig(req: NextRequest) {
   const { client } = await getAuthenticatedClient(req);
@@ -60,6 +60,38 @@ async function enrichContext(metaConfig: Awaited<ReturnType<typeof getMetaConfig
 
 const TOOLS: Anthropic.Tool[] = [
   {
+    name: 'list_draft_campaigns',
+    description: 'List all PAUSED (draft) campaigns with their ad sets and current targeting/tracking config. Call this before updating existing campaigns.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'update_adset',
+    description: 'Update an existing ad set: change geographic targeting (locations + radius) and/or set pixel event tracking. Call list_draft_campaigns first to get the adSetId.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        adSetId: { type: 'string', description: 'ID of the ad set to update' },
+        locations: { type: 'array', items: { type: 'string' }, description: 'City names to target (e.g. ["Alicante"])' },
+        radius: { type: 'number', description: 'Radius in km around each city' },
+        optimizationGoal: { type: 'string', description: 'e.g. OFFSITE_CONVERSIONS, LINK_CLICKS, REACH' },
+        customEventType: { type: 'string', description: 'Pixel event for conversion tracking: PURCHASE, LEAD, VIEW_CONTENT, ADD_TO_CART, COMPLETE_REGISTRATION' },
+        pixelId: { type: 'string', description: 'Override pixel ID (optional — uses account pixel if omitted)' },
+      },
+      required: ['adSetId'],
+    },
+  },
+  {
+    name: 'list_ads_with_creatives',
+    description: 'List all ads for a campaign with full creative details (thumbnails, video_data, image). Use this to verify video thumbnails are set.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        campaignId: { type: 'string', description: 'Campaign ID to fetch ads for' },
+      },
+      required: ['campaignId'],
+    },
+  },
+  {
     name: 'create_campaign_draft',
     description: 'Create a new Meta Ads campaign in DRAFT (PAUSED) mode. For multiple campaigns, call this tool multiple times in sequence.',
     input_schema: {
@@ -90,6 +122,58 @@ const TOOLS: Anthropic.Tool[] = [
 ];
 
 async function executeTool(name: string, params: any, metaConfig: Awaited<ReturnType<typeof getMetaConfig>>) {
+  if (name === 'list_draft_campaigns') {
+    const allCampaigns = await getCampaigns(metaConfig);
+    const paused = (allCampaigns?.data || []).filter((c: any) => c.status === 'PAUSED');
+    const result = await Promise.all(
+      paused.map(async (c: any) => {
+        const adSetsRes = await getAdSets(c.id, metaConfig);
+        return {
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          objective: c.objective,
+          adSets: (adSetsRes?.data || []).map((a: any) => ({
+            id: a.id,
+            name: a.name,
+            status: a.status,
+            optimization_goal: a.optimization_goal,
+            promoted_object: a.promoted_object || null,
+            geo_locations: a.targeting?.geo_locations || null,
+          })),
+        };
+      })
+    );
+    return { campaigns: result };
+  }
+
+  if (name === 'update_adset') {
+    return updateAdSetService(params.adSetId, {
+      locations: params.locations,
+      radius: params.radius,
+      optimizationGoal: params.optimizationGoal,
+      customEventType: params.customEventType,
+      pixelId: params.pixelId,
+    }, metaConfig);
+  }
+
+  if (name === 'list_ads_with_creatives') {
+    const adSetsRes = await getAdSets(params.campaignId, metaConfig);
+    const adSets = adSetsRes?.data || [];
+    const adsWithCreatives: any[] = [];
+    for (const adSet of adSets) {
+      const adsRes = await getAds(adSet.id, metaConfig);
+      for (const ad of (adsRes?.data || [])) {
+        let creative = null;
+        if (ad.creative?.id) {
+          try { creative = await getAdCreativeDetail(ad.creative.id, metaConfig); } catch { /* skip */ }
+        }
+        adsWithCreatives.push({ id: ad.id, name: ad.name, status: ad.status, adSetId: adSet.id, creative });
+      }
+    }
+    return { ads: adsWithCreatives };
+  }
+
   if (name === 'create_campaign_draft') {
     const payload = {
       ...params,

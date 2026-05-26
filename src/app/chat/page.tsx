@@ -180,7 +180,7 @@ export default function ChatPage() {
         let errMessage = `Error HTTP: ${res.status} ${res.statusText}`;
         try {
           const errData = await res.json();
-          if (errData.error) errMessage = errData.error;
+          if (errData.error) errMessage = typeof errData.error === 'string' ? errData.error : JSON.stringify(errData.error);
         } catch {
           if (res.status === 504) errMessage = 'El agente tardó demasiado (Timeout 504). Intenta de nuevo.';
         }
@@ -189,7 +189,7 @@ export default function ChatPage() {
 
       const data = await res.json();
 
-      if (data.error) throw new Error(data.error);
+      if (data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
 
       setMessages(prev => [...prev, {
         role: 'assistant',

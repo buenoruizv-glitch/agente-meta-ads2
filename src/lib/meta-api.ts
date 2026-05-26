@@ -156,6 +156,16 @@ export async function searchLocations(query: string, config?: MetaConfig) {
   return metaFetch(`/search`, { type: 'adgeolocation', q: query }, 'GET', undefined, config);
 }
 
+export async function getAdSet(adSetId: string, config?: MetaConfig) {
+  const fields = 'id,name,status,daily_budget,optimization_goal,targeting,bid_amount,campaign_id,promoted_object';
+  return metaFetch(`/${adSetId}`, { fields }, 'GET', undefined, config);
+}
+
+export async function getAdCreativeDetail(creativeId: string, config?: MetaConfig) {
+  const fields = 'id,name,object_story_spec,thumbnail_url,image_url';
+  return metaFetch(`/${creativeId}`, { fields }, 'GET', undefined, config);
+}
+
 // ─── Ad Images ───────────────────────────────────────────
 export async function uploadImageToMeta(imageUrl: string, config?: MetaConfig): Promise<string> {
   // Download the image from the given URL (e.g. Supabase Storage)

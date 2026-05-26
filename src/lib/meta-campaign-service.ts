@@ -7,6 +7,8 @@ import {
   uploadVideoToMeta,
   searchInterests,
   searchLocations,
+  getAdSet,
+  updateAdSet,
 } from './meta-api';
 
 interface DraftCampaignPayload {
@@ -92,6 +94,111 @@ function getPlacementsConfig(placements: string[]) {
   return config;
 }
 
+async function resolveGeoLocations(
+  locations: string[],
+  radius: number,
+  metaConfig: { token?: string; adAccountId?: string }
+) {
+  const geoLocations: any = { location_types: ['home', 'recent'] };
+  const customLocations: any[] = [];
+  const cities: any[] = [];
+  const regions: any[] = [];
+
+  for (const locName of locations) {
+    try {
+      const searchRes = await searchLocations(locName, metaConfig);
+      if (!searchRes.data || searchRes.data.length === 0) continue;
+
+      const match =
+        searchRes.data.find((l: any) => l.name.toLowerCase() === locName.toLowerCase()) ||
+        searchRes.data.find((l: any) => l.name.toLowerCase().includes(locName.toLowerCase())) ||
+        searchRes.data[0];
+
+      if (match) {
+        console.log(`[meta-campaign-service] Resolved '${locName}' → ${match.name} (${match.type})`);
+        if (match.type === 'city' && match.key) {
+          cities.push({ key: match.key, radius, distance_unit: 'kilometer' });
+        } else if ((match.type === 'region' || match.type === 'state') && match.key) {
+          regions.push({ key: match.key });
+        } else if (match.latitude && match.longitude) {
+          customLocations.push({ latitude: match.latitude, longitude: match.longitude, radius, distance_unit: 'kilometer' });
+        } else if (match.key) {
+          regions.push({ key: match.key });
+        }
+      }
+    } catch (err) {
+      console.error(`[meta-campaign-service] Error resolving location '${locName}':`, err);
+    }
+  }
+
+  if (cities.length > 0) geoLocations.cities = cities;
+  if (regions.length > 0) geoLocations.regions = regions;
+  if (customLocations.length > 0) geoLocations.custom_locations = customLocations;
+
+  if (!cities.length && !regions.length && !customLocations.length) {
+    throw new Error(`No se pudo encontrar ninguna ubicación válida para: ${locations.join(', ')}.`);
+  }
+
+  return geoLocations;
+}
+
+export async function updateAdSetService(
+  adSetId: string,
+  updates: {
+    locations?: string[];
+    radius?: number;
+    optimizationGoal?: string;
+    pixelId?: string;
+    customEventType?: string;
+  },
+  metaConfig: { token?: string; adAccountId?: string; pixelId?: string }
+) {
+  const current = await getAdSet(adSetId, metaConfig);
+  const payload: Record<string, any> = {};
+
+  if (updates.locations && updates.locations.length > 0) {
+    const geoLocations = await resolveGeoLocations(
+      updates.locations,
+      updates.radius || 80,
+      metaConfig
+    );
+    const existingTargeting = current.targeting || {};
+    payload.targeting = { ...existingTargeting, geo_locations: geoLocations };
+  }
+
+  if (updates.optimizationGoal) {
+    payload.optimization_goal = updates.optimizationGoal;
+    payload.billing_event = 'IMPRESSIONS';
+
+    if (updates.optimizationGoal === 'OFFSITE_CONVERSIONS') {
+      const resolvedPixel = updates.pixelId || metaConfig.pixelId;
+      if (resolvedPixel) {
+        payload.promoted_object = {
+          pixel_id: resolvedPixel,
+          custom_event_type: updates.customEventType || 'VIEW_CONTENT',
+        };
+      }
+    }
+  } else if (updates.pixelId || updates.customEventType) {
+    const resolvedPixel = updates.pixelId || metaConfig.pixelId;
+    if (resolvedPixel) {
+      payload.optimization_goal = 'OFFSITE_CONVERSIONS';
+      payload.billing_event = 'IMPRESSIONS';
+      payload.promoted_object = {
+        pixel_id: resolvedPixel,
+        custom_event_type: updates.customEventType || 'VIEW_CONTENT',
+      };
+    }
+  }
+
+  if (Object.keys(payload).length === 0) {
+    return { success: true, message: 'Nada que actualizar', adSetId };
+  }
+
+  const result = await updateAdSet(adSetId, payload, metaConfig);
+  return { success: true, adSetId, updated: Object.keys(payload), result };
+}
+
 export async function createCampaignDraftService(
   payload: DraftCampaignPayload,
   metaConfig: { token?: string; adAccountId?: string; pixelId?: string }
@@ -152,72 +259,7 @@ export async function createCampaignDraftService(
 
   // Resolve Locations/Radius
   if (locations && locations.length > 0) {
-    const geoLocations: any = {
-      location_types: ['home', 'recent'],
-    };
-    
-    const customLocations: any[] = [];
-    const cities: any[] = [];
-    const regions: any[] = [];
-
-    for (const locName of locations) {
-      try {
-        const searchRes = await searchLocations(locName, metaConfig);
-        if (!searchRes.data || searchRes.data.length === 0) {
-          console.warn(`[meta-campaign-service] No locations found for: ${locName}`);
-          continue;
-        }
-
-        // Find best match: 
-        // 1. Exact case-insensitive name match
-        // 2. Name includes search term
-        // 3. First result
-        const match = searchRes.data.find((l: any) => l.name.toLowerCase() === locName.toLowerCase()) || 
-                      searchRes.data.find((l: any) => l.name.toLowerCase().includes(locName.toLowerCase())) || 
-                      searchRes.data[0];
-
-        if (match) {
-          console.log(`[meta-campaign-service] Resolved location '${locName}' to: ${match.name} (${match.type}, key: ${match.key})`);
-          
-          if (match.type === 'city' && match.key) {
-            cities.push({
-              key: match.key,
-              radius: radius || 40,
-              distance_unit: 'kilometer'
-            });
-          } else if ((match.type === 'region' || match.type === 'state') && match.key) {
-            regions.push({ key: match.key });
-          } else if (match.latitude && match.longitude) {
-            customLocations.push({
-              latitude: match.latitude,
-              longitude: match.longitude,
-              radius: radius || 40,
-              distance_unit: 'kilometer'
-            });
-          } else if (match.key) {
-            // Fallback for other types that have a key (like zip codes or neighborhoods)
-            // Most of these can be treated as regions or custom locations, 
-            // but for safety we'll try to use it as a region if it has a key
-            regions.push({ key: match.key });
-          }
-        }
-      } catch (err) {
-        console.error(`[meta-campaign-service] Error resolving location '${locName}':`, err);
-      }
-    }
-
-    let hasAny = false;
-    if (cities.length > 0) { geoLocations.cities = cities; hasAny = true; }
-    if (regions.length > 0) { geoLocations.regions = regions; hasAny = true; }
-    if (customLocations.length > 0) { geoLocations.custom_locations = customLocations; hasAny = true; }
-
-    if (hasAny) {
-      targeting.geo_locations = geoLocations;
-    } else {
-      // If user specified locations but we couldn't resolve any, throw error instead of silent fallback to Spain
-      // This helps the agent report the exact problem.
-      throw new Error(`No se pudo encontrar ninguna ubicación válida para: ${locations.join(', ')}. Por favor, especifica el nombre de la ciudad o provincia con más detalle.`);
-    }
+    targeting.geo_locations = await resolveGeoLocations(locations, radius || 40, metaConfig);
   } else {
     // Default to whole country if no locations provided
     targeting.geo_locations = { countries: ['ES'], location_types: ['home', 'recent'] };
