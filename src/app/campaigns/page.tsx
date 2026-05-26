@@ -3,7 +3,7 @@ import { apiFetch } from '@/lib/api-client';
 import { useEffect, useState, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { CampaignStatusBadge, MetricCell, LoadingSkeleton, EmptyState } from '@/components/ui';
-import { RefreshCw, Play, Pause, Plus, Search } from 'lucide-react';
+import { RefreshCw, Play, Pause, Plus, Search, ClipboardList } from 'lucide-react';
 import { useClient } from '@/contexts/ClientContext';
 
 interface Campaign {
@@ -134,12 +134,17 @@ export default function CampaignsPage() {
                 <td>{c.kpis ? <MetricCell value={c.kpis.frequency} format="number" status={c.kpis.status.frequency as 'green'} /> : '—'}</td>
                 <td>{c.kpis ? <MetricCell value={c.kpis.conversions} /> : '—'}</td>
                 <td>
-                  <button
-                    className={`btn btn-sm ${c.status === 'ACTIVE' ? 'btn-danger' : 'btn-secondary'}`}
-                    onClick={() => toggleStatus(c)} disabled={updating === c.id}
-                  >
-                    {updating === c.id ? '...' : c.status === 'ACTIVE' ? <Pause size={12} /> : <Play size={12} />}
-                  </button>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <a href={`/preview?campaignId=${c.id}`} className="btn btn-ghost btn-sm" title="Ver resumen cliente">
+                      <ClipboardList size={12} />
+                    </a>
+                    <button
+                      className={`btn btn-sm ${c.status === 'ACTIVE' ? 'btn-danger' : 'btn-secondary'}`}
+                      onClick={() => toggleStatus(c)} disabled={updating === c.id}
+                    >
+                      {updating === c.id ? '...' : c.status === 'ACTIVE' ? <Pause size={12} /> : <Play size={12} />}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
