@@ -21,6 +21,7 @@ interface Ad {
   name: string;
   status: string;
   creative: AdCreative | null;
+  previews?: Record<string, string>; // placement → iframe HTML from Meta
 }
 
 interface AdSet {
@@ -70,154 +71,54 @@ function statusColor(s: string) {
   return 'var(--text-muted)';
 }
 
-function domain(url: string) {
-  try { return new URL(url).hostname.replace('www.', ''); } catch { return url; }
+// ─── Meta iframe preview ─────────────────────────────────
+
+// Dimensions Meta uses per format (native iframe sizes)
+const IFRAME_SIZES: Record<string, { w: number; h: number }> = {
+  FEED:    { w: 476, h: 400 },
+  STORIES: { w: 320, h: 569 },
+  REELS:   { w: 320, h: 569 },
+};
+const DISPLAY_WIDTHS: Record<string, number> = {
+  FEED: 320, STORIES: 210, REELS: 210,
+};
+
+function parseIframeSrc(html: string): string | null {
+  const m = html.match(/src=["']([^"']+)["']/);
+  return m ? m[1].replace(/&amp;/g, '&') : null;
 }
 
-// ─── Placement Mockups ────────────────────────────────────
+function AdIframePreview({ iframeHtml, placement }: { iframeHtml: string; placement: string }) {
+  const src = parseIframeSrc(iframeHtml);
+  const native = IFRAME_SIZES[placement] || { w: 476, h: 400 };
+  const displayW = DISPLAY_WIDTHS[placement] || 320;
+  const scale = displayW / native.w;
+  const displayH = Math.round(native.h * scale);
 
-function FeedMockup({ creative, adSetName }: { creative: AdCreative; adSetName: string }) {
-  const pageName = adSetName.split('|')[0]?.trim() || 'Tu Marca';
-  const thumb = creative.thumbnailUrl;
-
-  return (
-    <div style={{
-      width: '280px', background: '#fff', borderRadius: '8px', overflow: 'hidden',
-      boxShadow: '0 2px 12px rgba(0,0,0,0.25)', fontFamily: 'Arial, sans-serif', flexShrink: 0,
-    }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px' }}>
-        <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb, #7c3aed)', flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: '13px', fontWeight: 700, color: '#050505', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pageName}</div>
-          <div style={{ fontSize: '11px', color: '#65676b', display: 'flex', gap: '4px', alignItems: 'center' }}>
-            Patrocinado · <span>🌐</span>
-          </div>
-        </div>
-        <div style={{ color: '#65676b', fontSize: '18px', cursor: 'pointer' }}>···</div>
-      </div>
-
-      {/* Primary text */}
-      {creative.primaryText && (
-        <div style={{ padding: '0 12px 8px', fontSize: '13px', color: '#050505', lineHeight: '1.4', maxHeight: '58px', overflow: 'hidden' }}>
-          {creative.primaryText.slice(0, 120)}{creative.primaryText.length > 120 ? '...' : ''}
-        </div>
-      )}
-
-      {/* Media */}
-      <div style={{ width: '100%', aspectRatio: '1/1', background: '#f0f2f5', position: 'relative', overflow: 'hidden' }}>
-        {thumb ? (
-          <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-        ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bcc0c4', fontSize: '12px' }}>Sin imagen</div>
-        )}
-        {creative.type === 'video' && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '16px solid #fff', marginLeft: '4px' }} />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* CTA bar */}
-      <div style={{ background: '#f0f2f5', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ minWidth: 0 }}>
-          {creative.linkUrl && <div style={{ fontSize: '11px', color: '#65676b', textTransform: 'uppercase' }}>{domain(creative.linkUrl)}</div>}
-          {creative.headline && <div style={{ fontSize: '14px', fontWeight: 600, color: '#050505', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>{creative.headline}</div>}
-        </div>
-        <button style={{ background: '#e4e6eb', border: 'none', borderRadius: '6px', padding: '8px 12px', fontSize: '13px', fontWeight: 600, color: '#050505', cursor: 'pointer', flexShrink: 0 }}>
-          Más info
-        </button>
-      </div>
-
-      {/* Engagement bar */}
-      <div style={{ padding: '6px 12px 8px', borderTop: '1px solid #e4e6eb', display: 'flex', gap: '16px', fontSize: '13px', color: '#65676b' }}>
-        <span>👍 Me gusta</span><span>💬 Comentar</span><span>↗ Compartir</span>
-      </div>
-    </div>
-  );
-}
-
-function StoriesMockup({ creative, adSetName, isReel = false }: { creative: AdCreative; adSetName: string; isReel?: boolean }) {
-  const pageName = adSetName.split('|')[0]?.trim() || 'Tu Marca';
-  const thumb = creative.thumbnailUrl;
+  if (!src) return null;
 
   return (
-    <div style={{
-      width: '157px', height: '280px', background: '#111', borderRadius: '12px', overflow: 'hidden',
-      position: 'relative', boxShadow: '0 2px 12px rgba(0,0,0,0.4)', flexShrink: 0,
-      fontFamily: 'Arial, sans-serif',
-    }}>
-      {/* Background image */}
-      {thumb ? (
-        <img src={thumb} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-      ) : (
-        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)' }} />
-      )}
-
-      {/* Overlay gradient */}
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, transparent 30%, transparent 55%, rgba(0,0,0,0.7) 100%)' }} />
-
-      {/* Video play icon */}
-      {creative.type === 'video' && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 0, height: 0, borderTop: '7px solid transparent', borderBottom: '7px solid transparent', borderLeft: '12px solid #fff', marginLeft: '3px' }} />
-          </div>
-        </div>
-      )}
-
-      {/* Progress bars */}
-      <div style={{ position: 'absolute', top: '8px', left: '6px', right: '6px', display: 'flex', gap: '3px' }}>
-        {[1, 2, 3].map(i => (
-          <div key={i} style={{ flex: 1, height: '2px', borderRadius: '2px', background: i === 1 ? '#fff' : 'rgba(255,255,255,0.4)' }} />
-        ))}
+    <div style={{ width: displayW, height: displayH, overflow: 'hidden', borderRadius: '8px', boxShadow: '0 2px 12px rgba(0,0,0,0.3)', flexShrink: 0 }}>
+      <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: native.w, height: native.h }}>
+        <iframe
+          src={src}
+          width={native.w}
+          height={native.h}
+          frameBorder="0"
+          scrolling="no"
+          style={{ display: 'block', border: 'none' }}
+        />
       </div>
-
-      {/* Top bar */}
-      <div style={{ position: 'absolute', top: '18px', left: '8px', right: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb, #7c3aed)', border: '1.5px solid #fff', flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: '10px', fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pageName}</div>
-          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.75)' }}>Patrocinado</div>
-        </div>
-        <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: '14px' }}>✕</span>
-      </div>
-
-      {/* Bottom content */}
-      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '10px 10px 12px' }}>
-        {creative.headline && (
-          <div style={{ fontSize: '11px', fontWeight: 700, color: '#fff', marginBottom: '4px', lineHeight: '1.3', maxHeight: '28px', overflow: 'hidden' }}>{creative.headline}</div>
-        )}
-        {creative.primaryText && (
-          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.85)', marginBottom: '8px', maxHeight: '24px', overflow: 'hidden', lineHeight: '1.3' }}>
-            {creative.primaryText.slice(0, 80)}
-          </div>
-        )}
-        <button style={{ width: '100%', background: 'rgba(255,255,255,0.92)', border: 'none', borderRadius: '5px', padding: '6px', fontSize: '10px', fontWeight: 700, color: '#050505', cursor: 'pointer' }}>
-          Más información
-        </button>
-      </div>
-
-      {isReel && (
-        <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
-          {['❤️', '💬', '↗'].map((icon, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-              <span style={{ fontSize: '18px' }}>{icon}</span>
-              <span style={{ fontSize: '8px', color: '#fff' }}>0</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
 // ─── Ad Card ──────────────────────────────────────────────
 
-function AdCard({ ad, placements, adSetName }: { ad: Ad; placements: string[]; adSetName: string }) {
+function AdCard({ ad, placements }: { ad: Ad; placements: string[] }) {
   if (!ad.creative) return null;
+
+  const hasPreviews = ad.previews && Object.keys(ad.previews).length > 0;
 
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-border)', borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: '20px' }}>
@@ -238,18 +139,28 @@ function AdCard({ ad, placements, adSetName }: { ad: Ad; placements: string[]; a
         {ad.creative.linkUrl && <div style={{ marginTop: '4px' }}><span style={{ color: 'var(--text-muted)' }}>URL: </span><a href={ad.creative.linkUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--text-accent)', textDecoration: 'none' }}>{ad.creative.linkUrl.slice(0, 60)}{ad.creative.linkUrl.length > 60 ? '…' : ''} <ExternalLink size={10} style={{ display: 'inline' }} /></a></div>}
       </div>
 
-      {/* Placement mockups */}
-      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cómo se verá en cada posición</div>
-      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-        {placements.map(pl => (
-          <div key={pl} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>{PLACEMENT_LABELS[pl] || pl}</div>
-            {pl === 'FEED' && <FeedMockup creative={ad.creative!} adSetName={adSetName} />}
-            {pl === 'STORIES' && <StoriesMockup creative={ad.creative!} adSetName={adSetName} />}
-            {pl === 'REELS' && <StoriesMockup creative={ad.creative!} adSetName={adSetName} isReel />}
-          </div>
-        ))}
+      {/* Official Meta previews */}
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Vista previa oficial de Meta
       </div>
+      {hasPreviews ? (
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          {placements.map(pl => {
+            const html = ad.previews?.[pl];
+            if (!html) return null;
+            return (
+              <div key={pl} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>{PLACEMENT_LABELS[pl] || pl}</div>
+                <AdIframePreview iframeHtml={html} placement={pl} />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)' }}>
+          ⚠️ No se pudo obtener la vista previa de Meta para este anuncio. Es posible que el anuncio esté pendiente de revisión.
+        </div>
+      )}
     </div>
   );
 }
@@ -488,7 +399,7 @@ function PreviewPageInner() {
                 <div style={{ color: 'var(--text-muted)', fontSize: '13px', padding: '16px', background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-border)' }}>Sin anuncios en este conjunto.</div>
               ) : (
                 adSet.ads.map(ad => (
-                  <AdCard key={ad.id} ad={ad} placements={adSet.placements} adSetName={adSet.name} />
+                  <AdCard key={ad.id} ad={ad} placements={adSet.placements} />
                 ))
               )}
             </div>

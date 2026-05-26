@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedClient } from '@/lib/api-utils';
-import { getCampaigns, getAdSets, getAds, getAdCreativeDetail } from '@/lib/meta-api';
+import { getCampaigns, getAdSets, getAds, getAdCreativeDetail, getAdPreviews } from '@/lib/meta-api';
+
+const FORMAT_MAP: Record<string, string> = {
+  FEED: 'DESKTOP_FEED_STANDARD',
+  STORIES: 'INSTAGRAM_STORY',
+  REELS: 'INSTAGRAM_REELS',
+};
 
 function parseCreative(creative: any) {
   const spec = creative?.object_story_spec || {};
@@ -88,6 +94,8 @@ export async function GET(req: NextRequest) {
         const adsData = await getAds(adSet.id, metaConfig);
         const ads = adsData?.data || [];
 
+        const placements = parsePlacements(adSet.targeting || {});
+
         const adsDetail = await Promise.all(
           ads.map(async (ad: any) => {
             let creative = null;
@@ -97,7 +105,22 @@ export async function GET(req: NextRequest) {
                 creative = parseCreative(raw);
               } catch { /* skip */ }
             }
-            return { id: ad.id, name: ad.name, status: ad.status, creative };
+
+            // Fetch official Meta preview iframes (one per placement)
+            const previews: Record<string, string> = {};
+            await Promise.all(
+              placements.map(async (pl) => {
+                const fmt = FORMAT_MAP[pl];
+                if (!fmt) return;
+                try {
+                  const res = await getAdPreviews(ad.id, fmt, metaConfig);
+                  const body: string = res?.data?.[0]?.body || '';
+                  if (body) previews[pl] = body;
+                } catch { /* skip */ }
+              })
+            );
+
+            return { id: ad.id, name: ad.name, status: ad.status, creative, previews };
           })
         );
 
@@ -109,7 +132,7 @@ export async function GET(req: NextRequest) {
           dailyBudget: adSet.daily_budget ? parseInt(adSet.daily_budget) / 100 : null,
           optimizationGoal: adSet.optimization_goal || null,
           promotedObject: adSet.promoted_object || null,
-          placements: parsePlacements(targeting),
+          placements,
           targeting: {
             ageMin: targeting.age_min || 18,
             ageMax: targeting.age_max || 65,

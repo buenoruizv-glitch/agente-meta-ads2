@@ -166,6 +166,10 @@ export async function getAdCreativeDetail(creativeId: string, config?: MetaConfi
   return metaFetch(`/${creativeId}`, { fields }, 'GET', undefined, config);
 }
 
+export async function getAdPreviews(adId: string, adFormat: string, config?: MetaConfig) {
+  return metaFetch(`/${adId}/previews`, { ad_format: adFormat }, 'GET', undefined, config);
+}
+
 // ─── Ad Images ───────────────────────────────────────────
 export async function uploadImageToMeta(imageUrl: string, config?: MetaConfig): Promise<string> {
   // Download the image from the given URL (e.g. Supabase Storage)
