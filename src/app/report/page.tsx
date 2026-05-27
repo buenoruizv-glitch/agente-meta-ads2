@@ -11,6 +11,9 @@ interface CampaignReport {
   name: string;
   status: string;
   objective: string;
+  daily_budget?: string;
+  lifetime_budget?: string;
+  stop_time?: string;
   kpis: {
     spend: number;
     clicks: number;
@@ -43,6 +46,38 @@ function statusDot(s: string) {
   return null;
 }
 
+function parseBudget(raw?: string): number | null {
+  if (!raw) return null;
+  const n = parseInt(raw, 10);
+  return isNaN(n) ? null : n / 100;
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function BudgetCell({ c }: { c: CampaignReport }) {
+  const daily = parseBudget(c.daily_budget);
+  const lifetime = parseBudget(c.lifetime_budget);
+  const endDate = formatDate(c.stop_time);
+
+  return (
+    <div style={{ fontSize: '12px', lineHeight: '1.6' }}>
+      {daily != null && (
+        <div><span style={{ color: 'var(--text-muted)' }}>Diario:</span> <strong>€{daily.toFixed(2)}</strong></div>
+      )}
+      {lifetime != null && (
+        <div><span style={{ color: 'var(--text-muted)' }}>Total:</span> <strong>€{lifetime.toFixed(2)}</strong></div>
+      )}
+      {c.stop_time && (
+        <div><span style={{ color: 'var(--text-muted)' }}>Fin:</span> <strong>{endDate}</strong></div>
+      )}
+      {daily == null && lifetime == null && '—'}
+    </div>
+  );
+}
+
 function ReportPageInner() {
   const { currentClient } = useClient();
   const [campaigns, setCampaigns] = useState<CampaignReport[]>([]);
@@ -69,6 +104,7 @@ function ReportPageInner() {
   const totalConversions = campaigns.reduce((s, c) => s + (c.kpis?.conversions || 0), 0);
   const totalClicks = campaigns.reduce((s, c) => s + (c.kpis?.clicks || 0), 0);
   const avgRoas = active.filter(c => c.kpis?.roas).reduce((s, c, _, a) => s + (c.kpis?.roas || 0) / a.length, 0);
+  const totalDailyBudget = active.reduce((s, c) => s + (parseBudget(c.daily_budget) || 0), 0);
 
   const copyReport = () => {
     const dateLabel = DATE_LABELS[datePreset] || datePreset;
@@ -78,7 +114,8 @@ function ReportPageInner() {
       '',
       `RESUMEN GENERAL`,
       `• Campañas activas: ${active.length}`,
-      `• Gasto total: €${totalSpend.toFixed(2)}`,
+      `• Gasto total (período): €${totalSpend.toFixed(2)}`,
+      ...(totalDailyBudget > 0 ? [`• Presupuesto diario total: €${totalDailyBudget.toFixed(2)}`] : []),
       `• Conversiones: ${totalConversions}`,
       `• Clics totales: ${totalClicks}`,
       ...(avgRoas > 0 ? [`• ROAS promedio: ${avgRoas.toFixed(2)}x`] : []),
@@ -87,7 +124,12 @@ function ReportPageInner() {
     ];
     for (const c of active) {
       if (!c.kpis) continue;
+      const daily = parseBudget(c.daily_budget);
+      const lifetime = parseBudget(c.lifetime_budget);
       lines.push(`\n▸ ${c.name}`);
+      if (daily != null) lines.push(`  Presupuesto diario: €${daily.toFixed(2)}`);
+      if (lifetime != null) lines.push(`  Presupuesto total: €${lifetime.toFixed(2)}`);
+      if (c.stop_time) lines.push(`  Fecha fin: ${formatDate(c.stop_time)}`);
       lines.push(`  Gasto: €${c.kpis.spend.toFixed(2)} | Clics: ${c.kpis.clicks} | CTR: ${c.kpis.ctr.toFixed(2)}%`);
       lines.push(`  CPC: €${c.kpis.cpc.toFixed(2)} | Frecuencia: ${c.kpis.frequency.toFixed(1)} | ROAS: ${c.kpis.roas.toFixed(2)}x`);
       if (c.kpis.conversions > 0) lines.push(`  Conversiones: ${c.kpis.conversions}`);
@@ -102,7 +144,10 @@ function ReportPageInner() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Informe de Rendimiento</h1>
-          <p className="page-subtitle">{active.length} campañas activas · €{totalSpend.toFixed(2)} gastados</p>
+          <p className="page-subtitle">
+            {active.length} campañas activas · €{totalSpend.toFixed(2)} gastados
+            {totalDailyBudget > 0 && ` · €${totalDailyBudget.toFixed(2)}/día presupuestado`}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <select className="input" style={{ width: 'auto' }} value={datePreset} onChange={e => setDatePreset(e.target.value)}>
@@ -121,16 +166,17 @@ function ReportPageInner() {
       </div>
 
       {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px' }}>
         {[
-          { label: 'Gasto total', value: `€${totalSpend.toFixed(2)}` },
+          { label: 'Gasto real', value: `€${totalSpend.toFixed(2)}` },
+          { label: 'Presup. diario', value: totalDailyBudget > 0 ? `€${totalDailyBudget.toFixed(2)}` : '—' },
           { label: 'Conversiones', value: totalConversions.toString() },
           { label: 'Clics', value: totalClicks.toLocaleString() },
           { label: 'ROAS promedio', value: avgRoas > 0 ? `${avgRoas.toFixed(2)}x` : '—' },
-          { label: 'Campañas activas', value: active.length.toString() },
+          { label: 'Activas', value: active.length.toString() },
         ].map(card => (
           <div key={card.label} className="card" style={{ padding: '16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-primary)' }}>{card.value}</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>{card.value}</div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{card.label}</div>
           </div>
         ))}
@@ -143,6 +189,7 @@ function ReportPageInner() {
             <tr>
               <th>Campaña</th>
               <th>Estado</th>
+              <th>Presupuesto</th>
               <th>Gasto</th>
               <th>Clics</th>
               <th>CTR</th>
@@ -154,15 +201,15 @@ function ReportPageInner() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={{ padding: '32px' }}><LoadingSkeleton rows={5} /></td></tr>
+              <tr><td colSpan={10} style={{ padding: '32px' }}><LoadingSkeleton rows={5} /></td></tr>
             ) : campaigns.length === 0 ? (
-              <tr><td colSpan={9} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
+              <tr><td colSpan={10} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
                 Sin datos de campañas
               </td></tr>
             ) : campaigns.map(c => (
               <tr key={c.id}>
                 <td>
-                  <div style={{ fontWeight: 600, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontWeight: 600, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {c.name}
                   </div>
                   <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
@@ -170,6 +217,7 @@ function ReportPageInner() {
                   </div>
                 </td>
                 <td><CampaignStatusBadge status={c.status} /></td>
+                <td><BudgetCell c={c} /></td>
                 <td>{c.kpis ? <MetricCell value={c.kpis.spend} format="currency" /> : '—'}</td>
                 <td>{c.kpis ? <MetricCell value={c.kpis.clicks} /> : '—'}</td>
                 <td>
