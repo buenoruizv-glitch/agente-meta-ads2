@@ -64,9 +64,20 @@ export async function getCampaigns(config?: MetaConfig) {
   return metaFetch(`/${getAccountId(config)}/campaigns`, { fields, limit: '100' }, 'GET', undefined, config);
 }
 
-export async function getCampaignInsights(campaignId: string, datePreset = 'last_7d', config?: MetaConfig) {
+export async function getCampaignInsights(
+  campaignId: string,
+  datePreset = 'last_7d',
+  config?: MetaConfig,
+  timeRange?: { since: string; until: string }
+) {
   const fields = 'impressions,reach,clicks,ctr,cpc,cpm,spend,actions,action_values,frequency';
-  return metaFetch(`/${campaignId}/insights`, { fields, date_preset: datePreset }, 'GET', undefined, config);
+  const params: Record<string, string> = { fields };
+  if (timeRange) {
+    params.time_range = JSON.stringify(timeRange);
+  } else {
+    params.date_preset = datePreset;
+  }
+  return metaFetch(`/${campaignId}/insights`, params, 'GET', undefined, config);
 }
 
 export async function createCampaign(data: {
@@ -231,6 +242,29 @@ export async function uploadVideoToMeta(videoUrl: string, config?: MetaConfig): 
   const video_id = data.id;
   console.log(`[Meta API] Video upload complete. ID: ${video_id}`);
   return video_id;
+}
+
+export async function checkTokenStatus(config?: MetaConfig): Promise<{ valid: boolean; daysLeft: number | null; accountName?: string }> {
+  const token = (config?.token || '').trim();
+  if (!token) return { valid: false, daysLeft: null };
+
+  try {
+    const [debugRes, accountRes] = await Promise.all([
+      fetch(`https://graph.facebook.com/v19.0/debug_token?input_token=${token}&access_token=${token}`),
+      getAccountInfo(config).catch(() => null),
+    ]);
+    const debugData = await debugRes.json();
+    const info = debugData?.data;
+    const valid = !!info?.is_valid;
+    let daysLeft: number | null = null;
+    if (info?.expires_at) {
+      daysLeft = Math.floor((info.expires_at * 1000 - Date.now()) / 86400000);
+    }
+    const accountName = (accountRes as any)?.name;
+    return { valid, daysLeft, accountName };
+  } catch {
+    return { valid: false, daysLeft: null };
+  }
 }
 
 // ─── KPI Helpers ──────────────────────────────────────────

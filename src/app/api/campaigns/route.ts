@@ -19,6 +19,28 @@ async function getMetaConfig(req: NextRequest) {
   };
 }
 
+function getPreviousPeriod(datePreset: string): { since: string; until: string } {
+  const today = new Date();
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
+  const shift = (base: Date, days: number) => { const d = new Date(base); d.setDate(d.getDate() + days); return d; };
+
+  if (datePreset === 'last_7d') {
+    return { since: fmt(shift(today, -14)), until: fmt(shift(today, -8)) };
+  }
+  if (datePreset === 'last_14d') {
+    return { since: fmt(shift(today, -28)), until: fmt(shift(today, -15)) };
+  }
+  if (datePreset === 'last_30d') {
+    return { since: fmt(shift(today, -60)), until: fmt(shift(today, -31)) };
+  }
+  if (datePreset === 'this_month') {
+    const firstOfPrevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const lastOfPrevMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { since: fmt(firstOfPrevMonth), until: fmt(lastOfPrevMonth) };
+  }
+  return { since: fmt(shift(today, -14)), until: fmt(shift(today, -8)) };
+}
+
 // GET /api/campaigns — list all campaigns with insights
 export async function GET(req: NextRequest) {
   try {
@@ -28,6 +50,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const withInsights = searchParams.get('insights') === 'true';
     const datePreset = searchParams.get('date_preset') || 'last_7d';
+    const withCompare = searchParams.get('compare') === 'true';
 
     console.log('GET /api/campaigns - Fetching campaigns');
     const data = await getCampaigns(metaConfig);
@@ -38,16 +61,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ campaigns });
     }
 
+    const prevPeriod = withCompare ? getPreviousPeriod(datePreset) : null;
+
     // Fetch insights for each campaign (parallel)
     const withKPIs = await Promise.all(
       campaigns.map(async (campaign: Record<string, unknown>) => {
         try {
-          const insightsData = await getCampaignInsights(campaign.id as string, datePreset, metaConfig);
+          const insightsPromise = getCampaignInsights(campaign.id as string, datePreset, metaConfig);
+          const prevInsightsPromise = prevPeriod
+            ? getCampaignInsights(campaign.id as string, datePreset, metaConfig, prevPeriod)
+            : Promise.resolve(null);
+
+          const [insightsData, prevInsightsData] = await Promise.all([insightsPromise, prevInsightsPromise]);
           const rawInsights = insightsData?.data?.[0];
+          const rawPrev = prevInsightsData?.data?.[0];
           const kpis = rawInsights ? calculateKPIs(rawInsights) : null;
-          return { ...campaign, kpis, hasInsights: !!kpis };
+          const kpisPrev = rawPrev ? calculateKPIs(rawPrev) : null;
+          return { ...campaign, kpis, kpisPrev, hasInsights: !!kpis };
         } catch {
-          return { ...campaign, kpis: null, hasInsights: false };
+          return { ...campaign, kpis: null, kpisPrev: null, hasInsights: false };
         }
       })
     );

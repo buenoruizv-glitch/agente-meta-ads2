@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import KPICard from '@/components/KPICard';
 import { LoadingSkeleton, CampaignStatusBadge, MetricCell } from '@/components/ui';
-import { TrendingUp, TrendingDown, Zap, AlertTriangle, Play, Pause } from 'lucide-react';
+import { Zap, AlertTriangle, Play, ShieldAlert } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
 import { useClient } from '@/contexts/ClientContext';
 
@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [runningAutomation, setRunningAutomation] = useState(false);
   const [lastRun, setLastRun] = useState<string | null>(null);
+  const [tokenDaysLeft, setTokenDaysLeft] = useState<number | null>(null);
 
   useEffect(() => {
     if (!currentClient) return;
@@ -41,9 +42,12 @@ export default function DashboardPage() {
     Promise.all([
       apiFetch('/api/analytics?scope=account&date_preset=last_7d').then(r => r.json()),
       apiFetch('/api/campaigns?insights=true&date_preset=last_7d').then(r => r.json()),
-    ]).then(([analyticsData, campaignsData]) => {
+      apiFetch('/api/settings/verify').then(r => r.json()).catch(() => null),
+    ]).then(([analyticsData, campaignsData, tokenData]) => {
       setKPIs(analyticsData.kpis);
       setCampaigns((campaignsData.campaigns || []).slice(0, 8));
+      if (tokenData?.daysLeft != null) setTokenDaysLeft(tokenData.daysLeft);
+      else if (tokenData?.valid === false) setTokenDaysLeft(-1);
     }).finally(() => setLoading(false));
   }, [currentClient?.id]);
 
@@ -85,6 +89,23 @@ export default function DashboardPage() {
           </a>
         </div>
       </div>
+
+      {/* Token expiry banner */}
+      {tokenDaysLeft != null && tokenDaysLeft < 14 && (
+        <div style={{
+          background: tokenDaysLeft < 0 ? 'rgba(239,68,68,0.12)' : tokenDaysLeft < 7 ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
+          border: `1px solid ${tokenDaysLeft < 7 ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)'}`,
+          borderRadius: 'var(--radius-sm)', padding: '10px 16px',
+          fontSize: '13px', color: tokenDaysLeft < 7 ? 'var(--status-red)' : 'var(--status-yellow)',
+          marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px',
+        }}>
+          <ShieldAlert size={16} />
+          {tokenDaysLeft < 0
+            ? <>⚠️ El token de Meta ha <strong>caducado</strong>. Las campañas no se están monitorizando. <a href="/settings" style={{ textDecoration: 'underline' }}>Renovar en Configuración →</a></>
+            : <>⚠️ El token de Meta caduca en <strong>{tokenDaysLeft} días</strong>. <a href="/settings" style={{ textDecoration: 'underline' }}>Renovarlo en Configuración →</a></>
+          }
+        </div>
+      )}
 
       {lastRun && (
         <div style={{

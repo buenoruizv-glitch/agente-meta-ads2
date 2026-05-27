@@ -2,7 +2,7 @@
 import { apiFetch } from '@/lib/api-client';
 import { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Save, Eye, EyeOff, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
+import { Save, Eye, EyeOff, CheckCircle, Loader2, AlertCircle, ShieldCheck, ShieldX } from 'lucide-react';
 
 import { useClient } from '@/contexts/ClientContext';
 
@@ -13,6 +13,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ valid: boolean; daysLeft?: number | null; accountName?: string; error?: string } | null>(null);
   
   const [form, setForm] = useState({
     metaToken: '', adAccountId: '', anthropicKey: '', geminiKey: '',
@@ -74,6 +76,24 @@ export default function SettingsPage() {
   };
 
   const set = (key: string, value: unknown) => setForm(f => ({ ...f, [key]: value }));
+
+  const verifyCredentials = async () => {
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      const res = await apiFetch('/api/settings/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: form.metaToken, adAccountId: form.adAccountId }),
+      });
+      const data = await res.json();
+      setVerifyResult(data);
+    } catch {
+      setVerifyResult({ valid: false, error: 'No se pudo conectar' });
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -140,6 +160,31 @@ export default function SettingsPage() {
               <label className="label">ID de cuenta publicitaria</label>
               <input className="input" placeholder="act_123456789" value={form.adAccountId} onChange={e => set('adAccountId', e.target.value)} />
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Debe empezar por <code>act_</code></div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={verifyCredentials}
+                disabled={verifying || !form.metaToken || !form.adAccountId}
+              >
+                {verifying ? <><Loader2 className="animate-spin" size={13} /> Verificando...</> : <><ShieldCheck size={13} /> Verificar conexión</>}
+              </button>
+              {verifyResult && (
+                <span style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px',
+                  color: verifyResult.valid ? 'var(--status-green)' : 'var(--status-red)' }}>
+                  {verifyResult.valid
+                    ? <><ShieldCheck size={14} /> {verifyResult.accountName ? `✅ ${verifyResult.accountName}` : '✅ Conexión válida'}
+                        {verifyResult.daysLeft != null && verifyResult.daysLeft < 30 &&
+                          <span style={{ color: verifyResult.daysLeft < 7 ? 'var(--status-red)' : 'var(--status-yellow)', marginLeft: '8px' }}>
+                            · Caduca en {verifyResult.daysLeft}d
+                          </span>}
+                      </>
+                    : <><ShieldX size={14} /> {verifyResult.error || 'Token o Account ID inválido'}</>
+                  }
+                </span>
+              )}
             </div>
           </div>
         </div>
