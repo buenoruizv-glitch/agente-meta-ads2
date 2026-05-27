@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, MessageSquare, Megaphone, BarChart3,
-  FlaskConical, Zap, Settings, Plug, LogOut, Bell, Activity, ClipboardList
+  FlaskConical, Zap, Settings, Plug, LogOut, Bell, Activity, ClipboardList, TrendingUp
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: '/chat', icon: MessageSquare, label: 'Agente IA', badge: 'AI' },
   { href: '/campaigns', icon: Megaphone, label: 'Campañas' },
   { href: '/preview', icon: ClipboardList, label: 'Resumen cliente' },
+  { href: '/report', icon: TrendingUp, label: 'Informe rendimiento' },
   { href: '/analytics', icon: BarChart3, label: 'Analítica' },
   { href: '/ab-tests', icon: FlaskConical, label: 'A/B Tests' },
   { href: '/automation', icon: Zap, label: 'Automatización' },

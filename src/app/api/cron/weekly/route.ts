@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllActiveClients, createNotification, getSuggestions } from '@/lib/db-service';
+import { getAllActiveClients, createNotification, getSuggestions, saveSuggestions } from '@/lib/db-service';
 import { generateWeeklyReport } from '@/lib/expert-analysis';
 import { analyzeCampaigns } from '@/lib/automation-engine';
 
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   // Always check token health on weekly run
   await checkTokenExpiry();
 
-  const results: Array<{ clientId: string; status: string }> = [];
+  const results: Array<{ clientId: string; status: string; suggestions?: number }> = [];
 
   try {
     const clients = await getAllActiveClients();
@@ -78,15 +78,17 @@ export async function POST(req: NextRequest) {
 
         // 5. Guardar como notificación de tipo informe semanal
         const weekStr = getWeekString();
-        await createNotification(client.id, {
+        const hasSuggestions = report.suggestions && report.suggestions.length > 0;
+        const notificationId = await createNotification(client.id, {
           type: 'weekly_report',
-          priority: 'info',
+          priority: hasSuggestions ? 'warning' : 'info',
           title: `📊 Informe Semanal — ${weekStr}`,
           summary: report.budget_recommendation,
           report_data: {
             key_learnings: report.key_learnings,
             next_week_priorities: report.next_week_priorities,
             budget_recommendation: report.budget_recommendation,
+            suggestions_count: report.suggestions?.length || 0,
             campaigns_summary: campaigns.map(c => ({
               name: c.name,
               phase: c.phase,
@@ -101,7 +103,16 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        results.push({ clientId: client.id, status: 'ok' });
+        // 6. Guardar sugerencias accionables para que el usuario las apruebe
+        if (hasSuggestions) {
+          const metricsSnapshot: Record<string, unknown> = {};
+          campaigns.forEach(c => {
+            metricsSnapshot[c.id] = { roas: c.kpis7d.roas, ctr: c.kpis7d.ctr, cpc: c.kpis7d.cpc };
+          });
+          await saveSuggestions(client.id, notificationId, report.suggestions!, metricsSnapshot);
+        }
+
+        results.push({ clientId: client.id, status: 'ok', suggestions: report.suggestions?.length || 0 });
       } catch (clientErr) {
         console.error(`[Cron Weekly] Error for client ${client.id}:`, clientErr);
         results.push({ clientId: client.id, status: 'error' });

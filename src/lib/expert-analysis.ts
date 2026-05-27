@@ -24,9 +24,10 @@ export interface ExpertSuggestion {
 }
 
 export interface WeeklyInsight {
-  key_learnings: string[];   // 3 aprendizajes de la semana
-  next_week_priorities: string[]; // 2 prioridades
-  budget_recommendation: string;  // 1 recomendación global
+  key_learnings: string[];
+  next_week_priorities: string[];
+  budget_recommendation: string;
+  suggestions?: ExpertSuggestion[];
 }
 
 // Prompt del sistema — Se envía como `system` en cada llamada.
@@ -69,7 +70,19 @@ const DAILY_JSON_SCHEMA = `{
 const WEEKLY_JSON_SCHEMA = `{
   "key_learnings": ["string", "string", "string"],
   "next_week_priorities": ["string", "string"],
-  "budget_recommendation": "string"
+  "budget_recommendation": "string",
+  "suggestions": [
+    {
+      "campaign_id": "string",
+      "campaign_name": "string",
+      "priority": "urgent|warning|opportunity",
+      "action": "pause|increase_budget|decrease_budget|rotate_creative|expand_lal|check_delivery",
+      "action_value": { "percentage": 20 },
+      "ai_title": "string (max 80 chars)",
+      "ai_reasoning": "string (max 3 sentences)",
+      "expected_outcome": "string (1 sentence)"
+    }
+  ]
 }`;
 
 /**
@@ -170,12 +183,12 @@ export async function generateWeeklyReport(
 
       const response = await client.messages.create({
         model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 512,
+        max_tokens: 1024,
         system: EXPERT_SYSTEM_PROMPT,
         messages: [
           {
             role: 'user',
-            content: `Genera el informe semanal estratégico basado en estos datos. Responde ÚNICAMENTE con JSON válido:
+            content: `Genera el informe semanal estratégico basado en estos datos. Incluye sugerencias concretas accionables en "suggestions". Responde ÚNICAMENTE con JSON válido:
 
 ${WEEKLY_JSON_SCHEMA}
 
@@ -189,7 +202,13 @@ ${weeklyBrief}`,
       if (textBlock && textBlock.type === 'text') {
         const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            key_learnings: parsed.key_learnings || [],
+            next_week_priorities: parsed.next_week_priorities || [],
+            budget_recommendation: parsed.budget_recommendation || '',
+            suggestions: parsed.suggestions || [],
+          };
         }
       }
     } catch (claudeErr) {
@@ -213,7 +232,7 @@ ${weeklyBrief}`,
 
     const prompt = `${EXPERT_SYSTEM_PROMPT}
 
-Genera el informe semanal estratégico basado en estos datos. Responde ÚNICAMENTE con un JSON válido siguiendo este schema:
+Genera el informe semanal estratégico basado en estos datos. Incluye sugerencias concretas accionables en "suggestions". Responde ÚNICAMENTE con un JSON válido siguiendo este schema:
 
 ${WEEKLY_JSON_SCHEMA}
 
@@ -224,7 +243,13 @@ ${weeklyBrief}`;
     const text = result.response.text();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
-    return JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      key_learnings: parsed.key_learnings || [],
+      next_week_priorities: parsed.next_week_priorities || [],
+      budget_recommendation: parsed.budget_recommendation || '',
+      suggestions: parsed.suggestions || [],
+    };
   } catch (geminiErr) {
     console.error('[ExpertAnalysis] Gemini weekly report fallback failed:', geminiErr);
     return null;
